@@ -67,7 +67,7 @@ namespace {
 	template<typename T>
 	auto waitOp(const T& op, int seconds = 8)
 	{
-		if (op.wait_for(std::chrono::seconds(seconds)) == AsyncStatus::Started) {
+		if (op.wait_for(std::chrono::seconds(seconds)) == winrt::Windows::Foundation::AsyncStatus::Started) {
 			op.Cancel();
 			throw winrt::hresult_error(HRESULT_FROM_WIN32(ERROR_TIMEOUT));
 		}

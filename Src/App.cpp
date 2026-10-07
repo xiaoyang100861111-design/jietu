@@ -93,7 +93,8 @@ void App::excludeFromCapture(HWND hwnd)
 
 App::App()
 {
-    Ling::init(L"ScreenCapture");
+    // 公开仓库里的 Ling（CI 钉住的那个版本）的 init 还不带应用名这个参数
+    Ling::init();
     auto app = Ling::App::get();
     app->initArgs();
     Ling::D2D::addFonts({ L"icon.ttf" });
