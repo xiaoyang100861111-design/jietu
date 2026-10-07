@@ -56,14 +56,30 @@ jobs:
           $root = (Get-Location).Path
           $ling = "$root\deps\Ling"
           $common = @('/m', '/nologo', '/v:minimal', '/p:Configuration=Release', '/p:Platform=x64', "/p:PlatformToolset=$toolset")
-          msbuild "$ling\yoga\yoga.vcxproj" @common "/p:SolutionDir=$ling\"
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          msbuild "$ling\Ling.vcxproj" @common "/p:SolutionDir=$ling\"
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          "Visual Studio $vs, toolset $toolset" | Out-File build.log -Encoding utf8
+          function Build {
+            msbuild @args @common 2>&1 | Tee-Object -FilePath build.log -Append
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+          Build "$ling\yoga\yoga.vcxproj" "/p:SolutionDir=$ling\"
+          Build "$ling\Ling.vcxproj" "/p:SolutionDir=$ling\"
           Get-ChildItem "$ling\x64\Release" -Filter *.lib | Select-Object Name, Length
-          msbuild "$root\Src\ScreenCapture.vcxproj" @common "/p:SolutionDir=$root\" "/p:LingDir=$ling" "/p:GifskiDir=$root\deps\gifski"
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Build "$root\Src\ScreenCapture.vcxproj" "/p:SolutionDir=$root\" "/p:LingDir=$ling" "/p:GifskiDir=$root\deps\gifski"
           Get-ChildItem "$root\x64\Release" -Filter *.exe | Select-Object Name, Length
+
+      # 编译日志要登录才能下载，这里额外挂到一个固定的 release 上，方便不登录也能看
+      - name: Publish build log
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if (!(Test-Path build.log)) { exit 0 }
+          Select-String -Path build.log -Pattern 'error [A-Z]+\d+|fatal error' | Select-Object -First 60 | ForEach-Object { $_.Line } | Out-File build-errors.txt -Encoding utf8
+          gh release view ci-log 2>$null
+          if ($LASTEXITCODE) { gh release create ci-log --prerelease --title 'CI build log' --notes 'latest build log' }
+          gh release upload ci-log build.log build-errors.txt --clobber
+          exit 0
 
       - name: Smoke test
         shell: pwsh
