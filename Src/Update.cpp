@@ -273,6 +273,9 @@ namespace {
 
 void Update::checkLater()
 {
+	// 本分支（带截图翻译）不走自动升级：服务端放的是上游的官方版本，
+	// 升上去就把这边加的功能冲掉了
+	return;
 	//已经下载好了、只是还没找到弹窗的时机：接着等空闲
 	if (!newExePath.empty()) {
 		promptLater();

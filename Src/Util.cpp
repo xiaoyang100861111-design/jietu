@@ -287,6 +287,11 @@ void Util::addFileToClipboard(const std::wstring& filePath)
 	CloseClipboard();
 }
 
+bool Util::hasImageReader()
+{
+	return !findImageReader().empty();
+}
+
 bool Util::openWithImageReader(const int w, const int h, BYTE* data)
 {
 	auto exePath = findImageReader();

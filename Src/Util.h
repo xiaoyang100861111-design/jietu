@@ -23,6 +23,8 @@ public:
 	// 把图存成缓存文件，再交给外部插件 ImageReader.exe 做文字识别。插件先在本 exe
 	// 同目录找，再找 %appdata%\ScreenCapture\plugin，都找不到就用默认浏览器打开它的
 	// release 页面让用户自己下。缓存图由插件读完后自己删。
+	// 文字识别插件装了没有。没装的时候文字识别走系统自带的 OCR（见 Translate）
+	static bool hasImageReader();
 	static bool openWithImageReader(const int w, const int h, BYTE* data);
 	// 用 quirc 识别图里的二维码，返回识别到的内容，没识别到返回空串。
 	// 图里有多个码时用换行拼在一起

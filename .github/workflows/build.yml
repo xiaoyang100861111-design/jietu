@@ -1,0 +1,88 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # 依赖都钉死版本，免得上游一动这边就编不过
+  LING_REF: b77448ec7e72b1b961d3c6f8f87502d8df72aa5f
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout Ling
+        uses: actions/checkout@v4
+        with:
+          repository: xland/Ling
+          ref: ${{ env.LING_REF }}
+          path: deps/Ling
+
+      - name: Checkout gifski
+        shell: pwsh
+        run: git clone --depth 1 https://github.com/ImageOptim/gifski.git deps/gifski
+
+      - name: Cache gifski build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps/gifski/target
+            ~/.cargo/registry
+          key: gifski-${{ runner.os }}-v1
+
+      - name: Build gifski
+        shell: pwsh
+        working-directory: deps/gifski
+        env:
+          # 主工程是 /MT，Rust 这边也得静态链 CRT
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo build --release --lib
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationVersion
+          $toolset = if ($vs.StartsWith('18.')) { 'v145' } else { 'v143' }
+          Write-Host "Visual Studio $vs, toolset $toolset"
+          $root = (Get-Location).Path
+          $ling = "$root\deps\Ling"
+          $common = @('/m', '/nologo', '/v:minimal', '/p:Configuration=Release', '/p:Platform=x64', "/p:PlatformToolset=$toolset")
+          msbuild "$ling\yoga\yoga.vcxproj" @common "/p:SolutionDir=$ling\"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          msbuild "$ling\Ling.vcxproj" @common "/p:SolutionDir=$ling\"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Get-ChildItem "$ling\x64\Release" -Filter *.lib | Select-Object Name, Length
+          msbuild "$root\Src\ScreenCapture.vcxproj" @common "/p:SolutionDir=$root\" "/p:LingDir=$ling" "/p:GifskiDir=$root\deps\gifski"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Get-ChildItem "$root\x64\Release" -Filter *.exe | Select-Object Name, Length
+
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $p = Start-Process "x64\Release\ScreenCapture.exe" -ArgumentList '--enter=tray' -PassThru
+          Start-Sleep -Seconds 5
+          if ($p.HasExited) { throw "ScreenCapture.exe exited early, code $($p.ExitCode)" }
+          Stop-Process -Id $p.Id -Force
+          Write-Host 'started and stayed alive'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScreenCapture
+          path: x64/Release/ScreenCapture.exe
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: ScreenCapture build ${{ github.run_number }}
+          body: 带截图翻译的 ScreenCapture。下载 ScreenCapture.exe 直接运行即可。
+          files: x64/Release/ScreenCapture.exe

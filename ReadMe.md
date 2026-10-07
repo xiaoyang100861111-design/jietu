@@ -18,6 +18,15 @@
 - 支持用完即走（进程不驻留在系统中）。
 - 多语言支持。
 
+## 本分支新增：截图翻译
+
+- 框选后工具条上多了一个 **译** 按钮：识别选区里的文字，译文直接盖回原位，并把结果钉到桌面上（可以继续标注、复制、保存）。
+- 文字识别用的是 Windows 自带的 OCR，不需要额外下载插件；工具条上的"文字识别"在没装 `ImageReader.exe` 时也走它。
+- 翻译走微软 Edge 翻译接口（不通时自动换 Google），不需要密钥，需要联网。
+- 目标语言默认跟随界面语言（中文界面：外文→中文，中文→英文）。要固定目标语言，在 `config.json` 里加 `"translate":{"target":"en"}`（`zh-Hans` / `en` / `ja` / `ko` …）。
+- 命令行：`ScreenCapture.exe --enter=translate` 框选完直接翻译。
+- 本分支关闭了自动升级（否则会被升回不带翻译的官方版本）。
+
 ## 下载
 
 [Release](https://github.com/xland/ScreenCapture/releases/) （1MB）

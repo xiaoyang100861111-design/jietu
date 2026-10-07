@@ -111,6 +111,10 @@ void WinCap::layout()
 
 BOOL WinCap::setCursor()
 {
+    if (textWorking) {
+        SetCursor(LoadCursor(nullptr, IDC_WAIT));
+        return TRUE;
+    }
     if (stage == CapStage::Select) {
         SetCursor(LoadCursor(nullptr, IDC_CROSS));
         return TRUE;
@@ -382,6 +386,7 @@ void WinCap::onDown(POINT pos, bool isRight)
         close();
         return;
     }
+    if (textWorking) return; //识别 / 翻译用的是按下按钮那一刻的选区，结果回来之前不让再动
     // 选区框好之后，窗口里任意位置双击都等于点了工具条上的"复制到剪切板"。
     // 双击判定得自己做：Ling 的窗口类没带 CS_DBLCLKS，WM_LBUTTONDBLCLK 根本不会来，
     // 所以拿系统的双击间隔（用户在控制面板里调的那个）和双击判定框来认
@@ -515,6 +520,7 @@ bool WinCap::enterByArg()
     if (val == L"long") startLong();
     else if (val == L"video") startVideo();
     else if (val == L"ocr") startOcr();
+    else if (val == L"translate") startTranslate();
     else if (val == L"qr" || val == L"qrcode") startQrcode();
     else if (val == L"pin") startPin();   //等于替用户按住了 Ctrl 框选
     // 值不认识（用户拼错了）：当没给这个参数，照常出工具条。上面那两句白做了，
@@ -695,14 +701,74 @@ void WinCap::setMouseTransparent(bool transparent)
     SetWindowPos(hwnd, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
 
-// 文字识别由外部插件进程来做，这边只负责把选区里的像素递过去
+// 文字识别：装了外部插件（ImageReader.exe）就交给它，这边只负责把选区里的像素递过去；
+// 没装就用系统自带的 OCR，认出来的文字弹框给用户看，点确定写进剪切板
 void WinCap::startOcr()
 {
+    if (!Util::hasImageReader()) {
+        startTextWork(false);
+        return;
+    }
     std::vector<BYTE> pixels;
     int cw{ 0 }, ch{ 0 };
     if (!getCutPixels(pixels, cw, ch)) return;
-    // 插件缺失时 openWithImageReader 会打开下载页，同样得让位，所以不看返回值
     Util::openWithImageReader(cw, ch, pixels.data());
+    close();
+}
+
+// 截图翻译：认出选区里的文字，译文盖回原位，然后整张图钉到桌面上（还能接着标注、复制、保存）
+void WinCap::startTranslate()
+{
+    startTextWork(true);
+}
+
+void WinCap::startTextWork(bool translate)
+{
+    static unsigned workSeq{ 0 };
+    if (textWorking) return;
+    auto pixels = std::make_shared<std::vector<BYTE>>();
+    int cw{ 0 }, ch{ 0 };
+    if (!getCutPixels(*pixels, cw, ch)) return;
+    textWorking = true;
+    const auto id = textWorkId = ++workSeq;
+    if (toolCap) toolCap->hide();
+    SetCursor(LoadCursor(nullptr, IDC_WAIT));
+    // 回调不捕获 this：结果回来的时候这个窗口可能早被 ESC 关掉了，甚至已经换了一个新的
+    Translate::start(cw, ch, *pixels, translate, [id, translate, cw, ch, pixels](std::shared_ptr<Translate::Result> res) {
+        auto win = WinCap::get();
+        if (!win || win->isClosed || win->textWorkId != id) return;
+        win->onTextWorkDone(*res, translate, cw, ch, *pixels);
+    });
+}
+
+void WinCap::onTextWorkDone(const Translate::Result& res, bool translate, int cw, int ch, std::vector<BYTE>& pixels)
+{
+    textWorking = false;
+    if (res.ok && translate && Translate::render(cw, ch, pixels, res.blocks)) {
+        auto& maskRect = cutMask->maskRect;
+        WinPin::initFromData(int(maskRect.left) + x, int(maskRect.top) + y, cw, ch, pixels);
+        close();
+        return;
+    }
+    // 剩下的都要弹框。同 startQrcode：先 hide 让弹框独占桌面，弹框关了再真正退场
+    hide();
+    if (toolCap) toolCap->hide();
+    auto title = Lang::get(L"about.sysTip");
+    const UINT flags = MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND;
+    if (!res.ok) {
+        MessageBox(nullptr, res.err.data(), title.data(), MB_OK | flags);
+    }
+    else if (translate) {
+        MessageBox(nullptr, Lang::get(L"translate.failed").data(), title.data(), MB_OK | flags);
+    }
+    else {
+        // 文字太多时弹框会高出屏幕，只预览开头一段，写进剪切板的是全文
+        auto preview = res.text.size() > 1200 ? res.text.substr(0, 1200) + L"…" : res.text;
+        auto tip = preview + L"\n\n" + Lang::get(L"cap.ocrCopy");
+        if (MessageBox(nullptr, tip.data(), title.data(), MB_OKCANCEL | flags) == IDOK) {
+            Ling::Util::setTextToClipboard(res.text);
+        }
+    }
     close();
 }
 

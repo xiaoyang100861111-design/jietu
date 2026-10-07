@@ -19,6 +19,9 @@ public:
 	void setAutoStart(bool autoStart);
 	bool getAutoStart();
 	std::wstring getLang();
+	// 截图翻译的目标语言（config.json 里的 translate.target，微软翻译的语言代码，如 zh-Hans / en / ja）。
+	// 没配或者配成 auto 就返回 auto：跟着界面语言走，由 Translate 自己换算
+	std::wstring getTranslateTarget();
 	void setLang(const std::wstring& lang);
 	void initShortcutKeys();
 	// 贴图窗口子工具栏（ToolSub）的状态。每个工具在 config.json 的 toolPin 下各占一组，

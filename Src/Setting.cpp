@@ -173,6 +173,13 @@ std::wstring Setting::getLang()
     return std::wstring{ common.GetNamedString(L"language", L"zh-CN") };
 }
 
+std::wstring Setting::getTranslateTarget()
+{
+    auto obj = configObj.GetNamedObject(L"translate", nullptr);
+    if (!obj) return L"auto";
+    return std::wstring{ obj.GetNamedString(L"target", L"auto") };
+}
+
 void Setting::setLang(const std::wstring& langCode)
 {
     auto common = setting->configObj.GetNamedObject(L"common", nullptr);

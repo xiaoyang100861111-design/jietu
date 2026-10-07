@@ -59,8 +59,14 @@ void ToolCap::onCreated()
 		btn->setWidth(btnSize);
 		btn->setHeightPercent(100.f);
 		btn->setHoverBg(0xF2F2F2ff);
-		btn->setFontFamily(L"icon");
-		btn->setFontSize(13.f);
+		// 图标字体里没有翻译的图标，这个按钮直接用系统字体写个字
+		if (btnIds[i] == L"translate") {
+			btn->setFontSize(14.f);
+		}
+		else {
+			btn->setFontFamily(L"icon");
+			btn->setFontSize(13.f);
+		}
 		btn->onClick.add([this](Ling::Button* btn) { onClick(btn); });
 		if (!btnTips[i].empty()) {
 			tip->bind(btn, Lang::get(btnTips[i]));
@@ -84,6 +90,9 @@ void ToolCap::onClick(Ling::Button* btn)
 	}
 	else if (btn->id == L"ocr") {
 		win->startOcr();
+	}
+	else if (btn->id == L"translate") {
+		win->startTranslate();
 	}
 	else if (btn->id == L"qrcode") {
 		win->startQrcode();
