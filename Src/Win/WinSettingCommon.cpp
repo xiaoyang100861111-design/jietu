@@ -132,8 +132,8 @@ void WinSettingCommon::initDockCtrls()
     border->setBg(0xE0E0E0FF);
 }
 
-// 矩形 / 圆形的默认线条粗细。和标注工具条上那个滑块存的是同一个值（toolPin.<tool>.width），
-// 所以在标注时拖过滑块，这里显示的也会跟着变
+// 矩形 / 圆形的默认颜色和线条粗细。和标注工具条上的色块、滑块存的是同一份值
+// （toolPin.<tool>.colorIndex / width），所以在标注时改过，这里显示的也会跟着变
 void WinSettingCommon::initWidthCtrls(const std::wstring& tool)
 {
     auto box = makeChild<Ling::Node>();
@@ -149,7 +149,7 @@ void WinSettingCommon::initWidthCtrls(const std::wstring& tool)
 
     // 值域与 ToolSub 里滑块的一致
     auto read = [tool]() {
-        return std::clamp((int)std::lround(Setting::get()->getToolNum(tool, L"width", 2.f)), 1, 26);
+        return std::clamp((int)std::lround(Setting::get()->getToolNum(tool, L"width", 1.f)), 1, 26);
     };
     auto makeBtn = [box](const std::wstring& text, float width) {
         auto btn = box->makeChild<Ling::Button>();
@@ -160,6 +160,27 @@ void WinSettingCommon::initWidthCtrls(const std::wstring& tool)
         btn->setHoverBg(0XFFFFFFFF);
         return btn;
     };
+    // 颜色：一个色块，点一下换成下一种。色表与 ToolSub 里的 colors 一一对应，存的是下标
+    static const std::vector<uint32_t> colors{ 0XCF1322FF, 0XD48806FF, 0X389E0DFF, 0X13C2C2FF, 0X0958D9FF,
+        0X722ED1FF, 0XEB2F96FF, 0X000000FF, 0XFFFFFFFF };
+    auto readColor = [tool]() {
+        auto idx = static_cast<size_t>(Setting::get()->getToolNum(tool, L"colorIndex", 0.f));
+        return idx < colors.size() ? idx : size_t{ 0 };
+    };
+    auto swatch = box->makeChild<Ling::Button>();
+    swatch->setHeight(22.f);
+    swatch->setWidth(52.f);
+    swatch->setMarginRight(12.f);
+    swatch->setBorder(1.f, 0xE0E0E0FF);
+    swatch->setBg(colors[readColor()]);
+    swatch->setHoverBg(colors[readColor()]);
+    swatch->onClick.add([tool, readColor](Ling::Button* btn) {
+        const auto idx = (readColor() + 1) % colors.size();
+        Setting::get()->setToolNum(tool, L"colorIndex", static_cast<float>(idx));
+        btn->setBg(colors[idx]);
+        btn->setHoverBg(colors[idx]);
+    });
+
     auto minus = makeBtn(L"－", 36.f);
     auto value = makeBtn(std::to_wstring(read()), 52.f);
     auto plus = makeBtn(L"＋", 36.f);

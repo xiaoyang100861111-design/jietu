@@ -18,8 +18,8 @@ namespace {
 		float min, max, def;
 	};
 	const std::pair<const wchar_t*, SliderCfg> sliderCfgs[]{
-		{ L"rect",    { L"width",     1.f, 26.f,  2.f } },
-		{ L"ellipse", { L"width",     1.f, 26.f,  2.f } },
+		{ L"rect",    { L"width",     1.f, 26.f,  1.f } },
+		{ L"ellipse", { L"width",     1.f, 26.f,  1.f } },
 		{ L"arrow",   { L"width",     1.f, 16.f,  3.f } },
 		{ L"number",  { L"radius",    6.f, 86.f, 16.f } },
 		{ L"line",    { L"width",     1.f, 60.f, 12.f } },
