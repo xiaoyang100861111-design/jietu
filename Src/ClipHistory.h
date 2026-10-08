@@ -20,6 +20,8 @@ public:
 		std::wstring text;          // Text：内容；Files：各路径用 \n 连起来；Image：空
 		int imgW{ 0 }, imgH{ 0 };
 		unsigned long long hash{ 0 }; // 去重用：同样的东西再复制一遍只是挪到最前面
+		// 下面两项只有快捷话术用：备注名（可空）和所在分组（空 = 未分组）
+		std::wstring title, group;
 	};
 	~ClipHistory();
 	static void init();
@@ -31,8 +33,21 @@ public:
 	// 清掉所有没收藏的
 	void clear();
 	void togglePin(long long id);
-	// 把这一条重新写回系统剪切板，并挪到最前面
+	// 把这一条重新写回系统剪切板。历史记录会顺便挪到最前面，话术的顺序不动
 	bool writeToClipboard(long long id);
+	// —— 快捷话术：常用的文字 / 图片 / 文件（语音也是文件），永久保存，按分组放 ——
+	const std::vector<std::shared_ptr<Item>>& getPhrases() const { return phrases; }
+	const std::vector<std::wstring>& getGroups() const { return groups; }
+	// 名字为空或者已经有了返回 false
+	bool addGroup(const std::wstring& name);
+	// 删分组不删话术，里面的话术回到"未分组"
+	void removeGroup(const std::wstring& name);
+	// 把一条历史记录抄进话术
+	bool addPhraseFromItem(long long historyId, const std::wstring& group);
+	// 把系统剪切板里现在的内容存成一条话术
+	bool addPhraseFromClipboard(const std::wstring& group);
+	void removePhrase(long long id);
+	void setPhraseTitle(long long id, const std::wstring& title);
 	// 把前台还给 target，稍等一下再替用户按一次 Ctrl+V
 	void pasteTo(HWND target);
 	std::filesystem::path getImagePath(long long id) const;
@@ -48,6 +63,13 @@ private:
 	static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	void capture();
 	void add(std::shared_ptr<Item> item, const std::vector<BYTE>& pngBytes, int w, int h, std::vector<BYTE>& pixels);
+	// 读系统剪切板里现在的内容。图片的数据放在 pngBytes 或 pixels 里（二选一），由 saveImage 落盘
+	bool readClipboard(Item& item, std::vector<BYTE>& pngBytes, int& w, int& h, std::vector<BYTE>& pixels);
+	bool saveImage(long long id, const std::vector<BYTE>& pngBytes, int w, int h, std::vector<BYTE>& pixels);
+	// 历史和话术共用一套 id（图片文件名靠它），新 id 不能和任何一边撞
+	long long newId() const;
+	void loadPhrases();
+	void savePhrases();
 	void trim();
 	void load();
 	void save();
@@ -55,6 +77,8 @@ private:
 private:
 	HWND hwnd{ nullptr };
 	std::vector<std::shared_ptr<Item>> items;
+	std::vector<std::shared_ptr<Item>> phrases;
+	std::vector<std::wstring> groups;
 	std::filesystem::path dir;
 	// 自己往剪切板写东西之后的一小段时间内不记录，免得把刚写回去的那条又记一遍
 	ULONGLONG ignoreUntil{ 0 };

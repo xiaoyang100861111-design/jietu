@@ -14,8 +14,8 @@ namespace {
 	static constexpr UINT capMsg = 165;
 	static constexpr UINT delayMsg = 166;
 	static constexpr UINT clipMsg = 167;
+	static constexpr UINT phraseMsg = 168;
 
-	// 延时截图：留出几秒让用户把右键菜单、下拉框这些一碰键盘就消失的东西先弹出来
 	void CALLBACK onDelayTimer(HWND, UINT, UINT_PTR id, DWORD)
 	{
 		KillTimer(nullptr, id);
@@ -46,6 +46,11 @@ void Tray::init()
 	trayIns.reset(ptr);
 }
 
+void Tray::delayCapture()
+{
+	SetTimer(nullptr, 0, 3000, onDelayTimer);
+}
+
 Tray* Tray::get()
 {
 	return trayIns.get();
@@ -56,6 +61,8 @@ void Tray::onTrayRightClick()
 	auto menu = CreatePopupMenu();
 	AppendMenu(menu, MF_STRING, capMsg, Lang::get(L"tray.cap").data());
 	AppendMenu(menu, MF_STRING, delayMsg, Lang::get(L"tray.delay").data());
+	AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+	AppendMenu(menu, MF_STRING, phraseMsg, Lang::get(L"tray.phrase").data());
 	AppendMenu(menu, MF_STRING, clipMsg, Lang::get(L"tray.clip").data());
 	AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
 	AppendMenu(menu, MF_STRING, settingMsg, Lang::get(L"tray.setting").data());
@@ -67,11 +74,15 @@ void Tray::onTrayRightClick()
 	}
 	else if (menuId == delayMsg)
 	{
-		SetTimer(nullptr, 0, 3000, onDelayTimer);
+		delayCapture();
 	}
 	else if (menuId == clipMsg)
 	{
-		WinClip::toggle();
+		WinClip::toggle(WinClip::Clip);
+	}
+	else if (menuId == phraseMsg)
+	{
+		WinClip::toggle(WinClip::Phrase);
 	}
 	else if (menuId == settingMsg)
 	{

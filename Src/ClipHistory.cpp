@@ -182,6 +182,7 @@ ClipHistory::ClipHistory()
 	std::error_code ec;
 	std::filesystem::create_directories(dir, ec);
 	load();
+	loadPhrases();
 	// 只收消息的隐藏窗口：剪切板变化的通知、去抖和延时粘贴的定时器都挂在它身上
 	WNDCLASSEX wc{};
 	wc.cbSize = sizeof(wc);
@@ -257,20 +258,50 @@ void ClipHistory::capture()
 	// 密码管理器这类程序会放这个标记，意思是"别把这次复制记进历史"
 	static const UINT fmtExclude = RegisterClipboardFormat(L"ExcludeClipboardContentFromMonitorProcessing");
 	if (IsClipboardFormatAvailable(fmtExclude)) return;
+	auto item = std::make_shared<Item>();
+	std::vector<BYTE> pngBytes, pixels;
+	int w{ 0 }, h{ 0 };
 	if (!OpenClipboard(hwnd)) {
 		// 别的程序正占着剪切板，过一会儿再试，试几次还不行就算了
 		if (++retry <= 5) SetTimer(hwnd, timerCapture, 100, nullptr);
 		return;
 	}
 	retry = 0;
-	auto item = std::make_shared<Item>();
-	std::vector<BYTE> pngBytes, pixels;
-	int w{ 0 }, h{ 0 };
-	// 顺序有讲究：复制文件时剪切板里也有文件名文本，Office 复制文字时也会带一张图，
-	// 所以文件优先于文本、文本优先于图片
-	const bool ok = readFiles(*item) || readText(*item) || readImage(*item, pngBytes, w, h, pixels);
+	const bool ok = readClipboard(*item, pngBytes, w, h, pixels);
 	CloseClipboard();
 	if (ok) add(item, pngBytes, w, h, pixels);
+}
+
+// 调用前剪切板必须已经打开。
+// 顺序有讲究：复制文件时剪切板里也有文件名文本，Office 复制文字时也会带一张图，
+// 所以文件优先于文本、文本优先于图片
+bool ClipHistory::readClipboard(Item& item, std::vector<BYTE>& pngBytes, int& w, int& h, std::vector<BYTE>& pixels)
+{
+	return readFiles(item) || readText(item) || readImage(item, pngBytes, w, h, pixels);
+}
+
+bool ClipHistory::saveImage(long long id, const std::vector<BYTE>& pngBytes, int w, int h, std::vector<BYTE>& pixels)
+{
+	auto path = getImagePath(id);
+	if (!pngBytes.empty()) {
+		std::ofstream file{ path, std::ios::binary | std::ios::trunc };
+		if (!file) return false;
+		file.write(reinterpret_cast<const char*>(pngBytes.data()), pngBytes.size());
+		return file.good();
+	}
+	if (pixels.empty()) return false;
+	return Util::saveToFile(path.wstring(), w, h, pixels.data());
+}
+
+long long ClipHistory::newId() const
+{
+	auto id = nowMs();
+	auto used = [&](long long val) {
+		auto same = [val](auto& item) { return item->id == val; };
+		return std::any_of(items.begin(), items.end(), same) || std::any_of(phrases.begin(), phrases.end(), same);
+	};
+	while (used(id)) id++;
+	return id;
 }
 
 void ClipHistory::add(std::shared_ptr<Item> item, const std::vector<BYTE>& pngBytes, int w, int h, std::vector<BYTE>& pixels)
@@ -287,24 +318,8 @@ void ClipHistory::add(std::shared_ptr<Item> item, const std::vector<BYTE>& pngBy
 		notify();
 		return;
 	}
-	item->id = nowMs();
-	// id 兼作文件名，不能撞
-	while (std::any_of(items.begin(), items.end(), [&](auto& old) { return old->id == item->id; })) item->id++;
-	if (item->type == Type::Image) {
-		auto path = getImagePath(item->id);
-		bool saved{ false };
-		if (!pngBytes.empty()) {
-			std::ofstream file{ path, std::ios::binary | std::ios::trunc };
-			if (file) {
-				file.write(reinterpret_cast<const char*>(pngBytes.data()), pngBytes.size());
-				saved = file.good();
-			}
-		}
-		else if (!pixels.empty()) {
-			saved = Util::saveToFile(path.wstring(), w, h, pixels.data());
-		}
-		if (!saved) return;
-	}
+	item->id = newId();
+	if (item->type == Type::Image && !saveImage(item->id, pngBytes, w, h, pixels)) return;
 	items.insert(items.begin(), item);
 	trim();
 	save();
@@ -384,6 +399,16 @@ bool ClipHistory::writeToClipboard(long long id)
 			break;
 		}
 	}
+	bool isPhrase{ false };
+	if (!item) {
+		for (auto& phrase : phrases) {
+			if (phrase->id == id) {
+				item = phrase;
+				isPhrase = true;
+				break;
+			}
+		}
+	}
 	if (!item) return false;
 	ignoreUntil = GetTickCount64() + 800;
 	bool ok{ false };
@@ -402,7 +427,7 @@ bool ClipHistory::writeToClipboard(long long id)
 		}
 	}
 	if (!ok) return false;
-	if (index != 0) {
+	if (!isPhrase && index != 0) {
 		items.erase(items.begin() + index);
 		items.insert(items.begin(), item);
 		save();
@@ -514,6 +539,154 @@ void ClipHistory::save()
 		arr.Append(obj);
 	}
 	Ling::Util::saveFile((dir / L"history.json").wstring(), std::wstring{ arr.Stringify() });
+}
+
+bool ClipHistory::addGroup(const std::wstring& name)
+{
+	if (name.empty() || std::find(groups.begin(), groups.end(), name) != groups.end()) return false;
+	groups.push_back(name);
+	savePhrases();
+	notify();
+	return true;
+}
+
+void ClipHistory::removeGroup(const std::wstring& name)
+{
+	auto it = std::find(groups.begin(), groups.end(), name);
+	if (it == groups.end()) return;
+	groups.erase(it);
+	for (auto& phrase : phrases) {
+		if (phrase->group == name) phrase->group.clear();
+	}
+	savePhrases();
+	notify();
+}
+
+bool ClipHistory::addPhraseFromItem(long long historyId, const std::wstring& group)
+{
+	for (auto& src : items) {
+		if (src->id != historyId) continue;
+		auto phrase = std::make_shared<Item>(*src);
+		phrase->id = newId();
+		phrase->pinned = false;
+		phrase->group = group;
+		if (phrase->type == Type::Image) {
+			// 图片另抄一份：历史那边的会被挤掉、被清空，话术这份得一直在
+			std::error_code ec;
+			std::filesystem::copy_file(getImagePath(src->id), getImagePath(phrase->id), ec);
+			if (ec) return false;
+		}
+		phrases.insert(phrases.begin(), phrase);
+		savePhrases();
+		notify();
+		return true;
+	}
+	return false;
+}
+
+bool ClipHistory::addPhraseFromClipboard(const std::wstring& group)
+{
+	if (!OpenClipboard(hwnd)) return false;
+	auto phrase = std::make_shared<Item>();
+	std::vector<BYTE> pngBytes, pixels;
+	int w{ 0 }, h{ 0 };
+	const bool ok = readClipboard(*phrase, pngBytes, w, h, pixels);
+	CloseClipboard();
+	if (!ok) return false;
+	phrase->id = newId();
+	phrase->group = group;
+	if (phrase->type == Type::Image && !saveImage(phrase->id, pngBytes, w, h, pixels)) return false;
+	phrases.insert(phrases.begin(), phrase);
+	savePhrases();
+	notify();
+	return true;
+}
+
+void ClipHistory::removePhrase(long long id)
+{
+	for (size_t i = 0; i < phrases.size(); i++) {
+		if (phrases[i]->id != id) continue;
+		if (phrases[i]->type == Type::Image) {
+			std::error_code ec;
+			std::filesystem::remove(getImagePath(id), ec);
+		}
+		phrases.erase(phrases.begin() + i);
+		savePhrases();
+		notify();
+		return;
+	}
+}
+
+void ClipHistory::setPhraseTitle(long long id, const std::wstring& title)
+{
+	for (auto& phrase : phrases) {
+		if (phrase->id != id) continue;
+		phrase->title = title;
+		savePhrases();
+		notify();
+		return;
+	}
+}
+
+// phrases.json：{ "groups": [分组名...], "items": [话术...] }，话术的字段比历史多 title / group 两项
+void ClipHistory::loadPhrases()
+{
+	auto content = Ling::Util::readFileText(dir / L"phrases.json");
+	JsonObject root{ nullptr };
+	if (content.empty() || !JsonObject::TryParse(content, root)) return;
+	auto groupArr = root.GetNamedArray(L"groups", nullptr);
+	for (uint32_t i = 0; groupArr && i < groupArr.Size(); i++) {
+		if (groupArr.GetAt(i).ValueType() != JsonValueType::String) continue;
+		std::wstring name{ groupArr.GetStringAt(i) };
+		if (!name.empty() && std::find(groups.begin(), groups.end(), name) == groups.end()) groups.push_back(name);
+	}
+	auto arr = root.GetNamedArray(L"items", nullptr);
+	for (uint32_t i = 0; arr && i < arr.Size(); i++) {
+		if (arr.GetAt(i).ValueType() != JsonValueType::Object) continue;
+		auto obj = arr.GetObjectAt(i);
+		auto item = std::make_shared<Item>();
+		item->id = static_cast<long long>(obj.GetNamedNumber(L"id", 0));
+		const int type = static_cast<int>(obj.GetNamedNumber(L"type", 0));
+		if (item->id <= 0 || type < 0 || type > 2) continue;
+		item->type = static_cast<Type>(type);
+		item->text = std::wstring{ obj.GetNamedString(L"text", L"") };
+		item->imgW = static_cast<int>(obj.GetNamedNumber(L"w", 0));
+		item->imgH = static_cast<int>(obj.GetNamedNumber(L"h", 0));
+		item->title = std::wstring{ obj.GetNamedString(L"title", L"") };
+		item->group = std::wstring{ obj.GetNamedString(L"group", L"") };
+		// 分组被手工从文件里删掉了：话术留着，归到未分组
+		if (std::find(groups.begin(), groups.end(), item->group) == groups.end()) item->group.clear();
+		if (item->type == Type::Image) {
+			std::error_code ec;
+			if (!std::filesystem::exists(getImagePath(item->id), ec)) continue;
+		}
+		else if (item->text.empty()) {
+			continue;
+		}
+		phrases.push_back(std::move(item));
+	}
+}
+
+void ClipHistory::savePhrases()
+{
+	JsonArray groupArr;
+	for (auto& name : groups) groupArr.Append(JsonValue::CreateStringValue(name));
+	JsonArray arr;
+	for (auto& item : phrases) {
+		JsonObject obj;
+		obj.SetNamedValue(L"id", JsonValue::CreateNumberValue(static_cast<double>(item->id)));
+		obj.SetNamedValue(L"type", JsonValue::CreateNumberValue(static_cast<int>(item->type)));
+		obj.SetNamedValue(L"text", JsonValue::CreateStringValue(item->text));
+		obj.SetNamedValue(L"w", JsonValue::CreateNumberValue(item->imgW));
+		obj.SetNamedValue(L"h", JsonValue::CreateNumberValue(item->imgH));
+		obj.SetNamedValue(L"title", JsonValue::CreateStringValue(item->title));
+		obj.SetNamedValue(L"group", JsonValue::CreateStringValue(item->group));
+		arr.Append(obj);
+	}
+	JsonObject root;
+	root.SetNamedValue(L"groups", groupArr);
+	root.SetNamedValue(L"items", arr);
+	Ling::Util::saveFile((dir / L"phrases.json").wstring(), std::wstring{ root.Stringify() });
 }
 
 void ClipHistory::notify()

@@ -24,6 +24,9 @@ public:
 	// 要不要记录剪切板历史，默认记
 	bool getClipEnabled();
 	void setClipEnabled(bool val);
+	// 快捷话术面板贴边：0 关闭，1 左，2 上，3 右，4 下。鼠标顶到那条屏幕边上面板就滑出来
+	int getDockEdge();
+	void setDockEdge(int val);
 	int getMouseTrigger();
 	void setMouseTrigger(int val);
 	void setAutoStart(bool autoStart);

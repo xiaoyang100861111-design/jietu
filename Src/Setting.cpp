@@ -7,17 +7,22 @@
 #include "App.h"
 #include "Win/WinSetting.h"
 #include "Win/WinClip.h"
+#include "Tray.h"
 
 namespace {
     std::unique_ptr<Setting> setting;
     constexpr int capShortcutMsgId{ 100 };
     constexpr int translateShortcutMsgId{ 101 };
     constexpr int clipShortcutMsgId{ 102 };
+    constexpr int phraseShortcutMsgId{ 103 };
+    constexpr int delayShortcutMsgId{ 104 };
 
     int shortcutMsgId(const std::wstring& type)
     {
         if (type == L"translate") return translateShortcutMsgId;
         if (type == L"clip") return clipShortcutMsgId;
+        if (type == L"phrase") return phraseShortcutMsgId;
+        if (type == L"delay") return delayShortcutMsgId;
         return capShortcutMsgId;
     }
 
@@ -153,7 +158,8 @@ std::wstring Setting::getShortcutKey(const std::wstring& type)
     // 意外（配置被外部改动、问了个没配过的 type）变成一次崩溃
     // 没配过的给默认组合（老配置文件里没有 translate 这一项）
     std::wstring def = type == L"cap" ? L"Ctrl+Alt+A" : type == L"translate" ? L"Ctrl+Alt+T"
-        : type == L"clip" ? L"Ctrl+Alt+V" : L"";
+        : type == L"clip" ? L"Ctrl+Alt+V" : type == L"phrase" ? L"Ctrl+Alt+Q"
+        : type == L"delay" ? L"Ctrl+Alt+D" : L"";
     auto obj = configObj.GetNamedObject(L"shortcutKey", nullptr);
     if (!obj) return def;
     std::wstring val{ obj.GetNamedString(type, L"") };
@@ -193,6 +199,26 @@ void Setting::setClipEnabled(bool val)
     }
     common.SetNamedValue(L"clipHistory", JsonValue::CreateBooleanValue(val));
     save();
+}
+
+int Setting::getDockEdge()
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) return 0;
+    auto val = static_cast<int>(common.GetNamedNumber(L"dockEdge", 0));
+    return val >= 0 && val <= 4 ? val : 0;
+}
+
+void Setting::setDockEdge(int val)
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) {
+        common = JsonObject();
+        configObj.SetNamedValue(L"common", common);
+    }
+    common.SetNamedValue(L"dockEdge", JsonValue::CreateNumberValue(val));
+    save();
+    WinClip::applyDock();
 }
 
 int Setting::getMouseTrigger()
@@ -377,6 +403,8 @@ void Setting::initShortcutKeys()
     lingApp->regHotKey(getShortcutKey(L"cap"), capShortcutMsgId);
     lingApp->regHotKey(getShortcutKey(L"translate"), translateShortcutMsgId);
     lingApp->regHotKey(getShortcutKey(L"clip"), clipShortcutMsgId);
+    lingApp->regHotKey(getShortcutKey(L"phrase"), phraseShortcutMsgId);
+    lingApp->regHotKey(getShortcutKey(L"delay"), delayShortcutMsgId);
     applyMouseTrigger(getMouseTrigger());
 
     lingApp->onHotKey.add([this](UINT msg) {
@@ -387,7 +415,13 @@ void Setting::initShortcutKeys()
             WinCap::init(true); //框完选区直接翻译
         }
         else if (msg == clipShortcutMsgId) {
-            WinClip::toggle();
+            WinClip::toggle(WinClip::Clip);
+        }
+        else if (msg == phraseShortcutMsgId) {
+            WinClip::toggle(WinClip::Phrase);
+        }
+        else if (msg == delayShortcutMsgId) {
+            Tray::delayCapture();
         }
     });
     // 已经在运行时又双击了一次 exe：不截图（截图只走快捷键 / 托盘），

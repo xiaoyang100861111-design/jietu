@@ -13,6 +13,8 @@ private:
 	void initLangCtrls();
 	void initThemeCtrls();
 	void initClipCtrls();
+	void initDockCtrls();
+	void initWidthCtrls(const std::wstring& tool);
 	void setAutoStartBtn(Ling::Button* btn);
 	void showSelectBox(Ling::Button* btn);
 private:

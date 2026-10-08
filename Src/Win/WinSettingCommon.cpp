@@ -1,5 +1,7 @@
 ﻿#include "pch.h"
 #include <commdlg.h>
+#include <algorithm>
+#include <cmath>
 #include "../Lang.h"
 #include "../Setting.h"
 #include "WinSetting.h"
@@ -11,6 +13,9 @@ WinSettingCommon::WinSettingCommon(Ling::WinBase* parent):Ling::Node(parent)
     initLangCtrls();
     initThemeCtrls();
     initClipCtrls();
+    initDockCtrls();
+    initWidthCtrls(L"rect");
+    initWidthCtrls(L"ellipse");
     auto weakThis = getWeakThis();
     // 这个回调一直挂在窗口上，而本节点可能在窗口关闭之前就被菜单切换换掉了，
     // 所以先确认自己还活着再去碰成员
@@ -91,6 +96,81 @@ void WinSettingCommon::initLangCtrls()
         if (selectBox) return;
         this->showSelectBox(btn);
         });
+    auto border = makeChild<Ling::Node>();
+    border->setHeight(1.f);
+    border->setBg(0xE0E0E0FF);
+}
+
+// 快捷话术面板贴边：点一下按钮在 关闭 / 左 / 上 / 右 / 下 之间轮换
+void WinSettingCommon::initDockCtrls()
+{
+    auto box = makeChild<Ling::Node>();
+    box->setHeight(39.f);
+    box->setFlexDirection(Ling::FlexDirection::Row);
+    box->setAlignItems(Ling::Align::Center);
+
+    auto label = box->makeChild<Ling::Label>();
+    label->setText(Lang::get(L"setting.dock"));
+    label->setHeightPercent(100.f);
+    label->setJustifyContent(Ling::Justify::Center);
+    label->setFlexGrow(1.f);
+
+    auto btn = box->makeChild<Ling::Button>();
+    btn->setText(Lang::get(std::format(L"setting.dock{}", Setting::get()->getDockEdge())));
+    btn->setHeight(28.f);
+    btn->setWidth(160.f);
+    btn->setBorder(1.f, 0xE0E0E0FF);
+    btn->setHoverBg(0XFFFFFFFF);
+    btn->onClick.add([](Ling::Button* btn) {
+        auto val = (Setting::get()->getDockEdge() + 1) % 5;
+        Setting::get()->setDockEdge(val);
+        btn->setText(Lang::get(std::format(L"setting.dock{}", val)));
+    });
+
+    auto border = makeChild<Ling::Node>();
+    border->setHeight(1.f);
+    border->setBg(0xE0E0E0FF);
+}
+
+// 矩形 / 圆形的默认线条粗细。和标注工具条上那个滑块存的是同一个值（toolPin.<tool>.width），
+// 所以在标注时拖过滑块，这里显示的也会跟着变
+void WinSettingCommon::initWidthCtrls(const std::wstring& tool)
+{
+    auto box = makeChild<Ling::Node>();
+    box->setHeight(39.f);
+    box->setFlexDirection(Ling::FlexDirection::Row);
+    box->setAlignItems(Ling::Align::Center);
+
+    auto label = box->makeChild<Ling::Label>();
+    label->setText(Lang::get(L"setting." + tool + L"Width"));
+    label->setHeightPercent(100.f);
+    label->setJustifyContent(Ling::Justify::Center);
+    label->setFlexGrow(1.f);
+
+    // 值域与 ToolSub 里滑块的一致
+    auto read = [tool]() {
+        return std::clamp((int)std::lround(Setting::get()->getToolNum(tool, L"width", 2.f)), 1, 26);
+    };
+    auto makeBtn = [box](const std::wstring& text, float width) {
+        auto btn = box->makeChild<Ling::Button>();
+        btn->setText(text);
+        btn->setHeight(28.f);
+        btn->setWidth(width);
+        btn->setBorder(1.f, 0xE0E0E0FF);
+        btn->setHoverBg(0XFFFFFFFF);
+        return btn;
+    };
+    auto minus = makeBtn(L"－", 36.f);
+    auto value = makeBtn(std::to_wstring(read()), 52.f);
+    auto plus = makeBtn(L"＋", 36.f);
+    auto step = [tool, read, value](int delta) {
+        const int val = std::clamp(read() + delta, 1, 26);
+        Setting::get()->setToolNum(tool, L"width", (float)val);
+        value->setText(std::to_wstring(val));
+    };
+    minus->onClick.add([step](Ling::Button*) { step(-1); });
+    plus->onClick.add([step](Ling::Button*) { step(1); });
+
     auto border = makeChild<Ling::Node>();
     border->setHeight(1.f);
     border->setBg(0xE0E0E0FF);
