@@ -6,15 +6,19 @@
 #include "Win/WinCap.h"
 #include "App.h"
 #include "Win/WinSetting.h"
+#include "Win/WinClip.h"
 
 namespace {
     std::unique_ptr<Setting> setting;
     constexpr int capShortcutMsgId{ 100 };
     constexpr int translateShortcutMsgId{ 101 };
+    constexpr int clipShortcutMsgId{ 102 };
 
     int shortcutMsgId(const std::wstring& type)
     {
-        return type == L"translate" ? translateShortcutMsgId : capShortcutMsgId;
+        if (type == L"translate") return translateShortcutMsgId;
+        if (type == L"clip") return clipShortcutMsgId;
+        return capShortcutMsgId;
     }
 
     // 低级鼠标钩子：把选定的那个鼠标键变成截图键。钩子回调必须马上返回，
@@ -148,7 +152,8 @@ std::wstring Setting::getShortcutKey(const std::wstring& type)
     // 一路用带默认值的重载：启动时 ensureDefaults 已经补齐过，这里只是别让运行期
     // 意外（配置被外部改动、问了个没配过的 type）变成一次崩溃
     // 没配过的给默认组合（老配置文件里没有 translate 这一项）
-    std::wstring def = type == L"cap" ? L"Ctrl+Alt+A" : type == L"translate" ? L"Ctrl+Alt+T" : L"";
+    std::wstring def = type == L"cap" ? L"Ctrl+Alt+A" : type == L"translate" ? L"Ctrl+Alt+T"
+        : type == L"clip" ? L"Ctrl+Alt+V" : L"";
     auto obj = configObj.GetNamedObject(L"shortcutKey", nullptr);
     if (!obj) return def;
     std::wstring val{ obj.GetNamedString(type, L"") };
@@ -170,6 +175,23 @@ void Setting::setThemeColor(UINT rgb)
         configObj.SetNamedValue(L"common", common);
     }
     common.SetNamedValue(L"themeColor", JsonValue::CreateNumberValue(static_cast<double>(rgb & 0xFFFFFF)));
+    save();
+}
+
+bool Setting::getClipEnabled()
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    return !common || common.GetNamedBoolean(L"clipHistory", true);
+}
+
+void Setting::setClipEnabled(bool val)
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) {
+        common = JsonObject();
+        configObj.SetNamedValue(L"common", common);
+    }
+    common.SetNamedValue(L"clipHistory", JsonValue::CreateBooleanValue(val));
     save();
 }
 
@@ -354,6 +376,7 @@ void Setting::initShortcutKeys()
     // 取不到就用默认的那个组合：热键注册不上顶多是快捷键不好用，不该让程序起不来
     lingApp->regHotKey(getShortcutKey(L"cap"), capShortcutMsgId);
     lingApp->regHotKey(getShortcutKey(L"translate"), translateShortcutMsgId);
+    lingApp->regHotKey(getShortcutKey(L"clip"), clipShortcutMsgId);
     applyMouseTrigger(getMouseTrigger());
 
     lingApp->onHotKey.add([this](UINT msg) {
@@ -362,6 +385,9 @@ void Setting::initShortcutKeys()
         }
         else if (msg == translateShortcutMsgId) {
             WinCap::init(true); //框完选区直接翻译
+        }
+        else if (msg == clipShortcutMsgId) {
+            WinClip::toggle();
         }
     });
     // 已经在运行时又双击了一次 exe：不截图（截图只走快捷键 / 托盘），

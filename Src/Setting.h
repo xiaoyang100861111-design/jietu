@@ -21,6 +21,9 @@ public:
 	void setThemeColor(UINT rgb);
 	// 不按键盘、用鼠标键触发截图：0 关闭，1 中键，2 侧键（后退），3 侧键（前进）。
 	// 按键盘上的 Alt 会把已经弹出来的右键菜单关掉，想截菜单时用它
+	// 要不要记录剪切板历史，默认记
+	bool getClipEnabled();
+	void setClipEnabled(bool val);
 	int getMouseTrigger();
 	void setMouseTrigger(int val);
 	void setAutoStart(bool autoStart);

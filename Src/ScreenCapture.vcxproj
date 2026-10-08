@@ -166,6 +166,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="App.cpp" />
+    <ClCompile Include="ClipHistory.cpp" />
+    <ClCompile Include="Win\WinClip.cpp" />
     <ClCompile Include="History.cpp" />
     <ClCompile Include="Lang.cpp" />
     <ClCompile Include="main.cpp" />
@@ -263,6 +265,8 @@
     <ClInclude Include="Tool\ToolVideo.h" />
     <ClInclude Include="Tip.h" />
     <ClInclude Include="Translate.h" />
+    <ClInclude Include="ClipHistory.h" />
+    <ClInclude Include="Win\WinClip.h" />
     <ClInclude Include="Tray.h" />
     <ClInclude Include="Update.h" />
     <ClInclude Include="Util.h" />

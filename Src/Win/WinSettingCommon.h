@@ -12,6 +12,7 @@ private:
 	void initAutoStartCtrls();
 	void initLangCtrls();
 	void initThemeCtrls();
+	void initClipCtrls();
 	void setAutoStartBtn(Ling::Button* btn);
 	void showSelectBox(Ling::Button* btn);
 private:

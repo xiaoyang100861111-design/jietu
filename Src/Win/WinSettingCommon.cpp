@@ -10,6 +10,7 @@ WinSettingCommon::WinSettingCommon(Ling::WinBase* parent):Ling::Node(parent)
     initAutoStartCtrls();
     initLangCtrls();
     initThemeCtrls();
+    initClipCtrls();
     auto weakThis = getWeakThis();
     // 这个回调一直挂在窗口上，而本节点可能在窗口关闭之前就被菜单切换换掉了，
     // 所以先确认自己还活着再去碰成员
@@ -90,6 +91,42 @@ void WinSettingCommon::initLangCtrls()
         if (selectBox) return;
         this->showSelectBox(btn);
         });
+    auto border = makeChild<Ling::Node>();
+    border->setHeight(1.f);
+    border->setBg(0xE0E0E0FF);
+}
+
+// 记录剪切板历史的开关，样子和开机自启动那个一样
+void WinSettingCommon::initClipCtrls()
+{
+    auto box = makeChild<Ling::Node>();
+    box->setHeight(39.f);
+    box->setFlexDirection(Ling::FlexDirection::Row);
+    box->setAlignItems(Ling::Align::Center);
+
+    auto label = box->makeChild<Ling::Label>();
+    label->setText(Lang::get(L"setting.clipHistory"));
+    label->setHeightPercent(100.f);
+    label->setJustifyContent(Ling::Justify::Center);
+    label->setFlexGrow(1.f);
+
+    auto apply = [](Ling::Button* btn) {
+        const bool on = Setting::get()->getClipEnabled();
+        btn->setText(on ? L"\ue688" : L"\ue687");
+        btn->setColor(on ? 0x597ef7ff : 0x666666FF);
+        btn->setHoverColor(on ? 0x597ef7ff : 0x666666FF);
+    };
+    auto btn = box->makeChild<Ling::Button>();
+    btn->setFontFamily(L"icon");
+    btn->setHeightPercent(100.f);
+    btn->setFontSize(18.f);
+    btn->setWidth(60.f);
+    apply(btn);
+    btn->onClick.add([apply](Ling::Button* btn) {
+        Setting::get()->setClipEnabled(!Setting::get()->getClipEnabled());
+        apply(btn);
+    });
+
     auto border = makeChild<Ling::Node>();
     border->setHeight(1.f);
     border->setBg(0xE0E0E0FF);
