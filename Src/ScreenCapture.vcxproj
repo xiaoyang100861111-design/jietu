@@ -130,6 +130,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateMapFile>true</GenerateMapFile>
       <AdditionalLibraryDirectories>$(LingDir)\x64\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>dwmapi.lib;windowsapp.lib;comctl32.lib;imm32.lib;version.lib;mf.lib;mfreadwrite.lib;mfplat.lib;mfuuid.lib;ntdll.lib;Userenv.lib;ws2_32.lib;bcrypt.lib;Yoga.lib;Ling.lib;$(GifskiDir)\target\release\gifski.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
@@ -156,6 +157,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateMapFile>true</GenerateMapFile>
       <AdditionalLibraryDirectories>$(LingDir)\x64\$(Configuration);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>dwmapi.lib;windowsapp.lib;comctl32.lib;imm32.lib;version.lib;mf.lib;mfreadwrite.lib;mfplat.lib;mfuuid.lib;ntdll.lib;Userenv.lib;ws2_32.lib;bcrypt.lib;Yoga.lib;Ling.lib;$(GifskiDir)\target\release\gifski.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
@@ -166,6 +168,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="App.cpp" />
+    <ClCompile Include="Log.cpp" />
     <ClCompile Include="ClipHistory.cpp" />
     <ClCompile Include="Win\WinClip.cpp" />
     <ClCompile Include="History.cpp" />
@@ -266,6 +269,7 @@
     <ClInclude Include="Tool\ToolVideo.h" />
     <ClInclude Include="Tip.h" />
     <ClInclude Include="Translate.h" />
+    <ClInclude Include="Log.h" />
     <ClInclude Include="ClipHistory.h" />
     <ClInclude Include="Win\WinClip.h" />
     <ClInclude Include="Tray.h" />

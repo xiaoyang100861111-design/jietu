@@ -94,7 +94,10 @@ jobs:
       # 不能用中文名：GitHub 会把发布附件名里的非 ASCII 字符去掉，"UU截图.exe" 传上去就成了 "UU.exe"
       - name: Rename
         shell: pwsh
-        run: Copy-Item "x64\Release\ScreenCapture.exe" "x64\Release\UUjietu.exe"
+        run: |
+          Copy-Item "x64\Release\ScreenCapture.exe" "x64\Release\UUjietu.exe"
+          # map 文件：崩溃日志里记的是"模块+偏移"，靠它查是哪个函数
+          if (Test-Path "x64\Release\ScreenCapture.map") { Copy-Item "x64\Release\ScreenCapture.map" "x64\Release\UUjietu.map" } else { Write-Host "no map file"; Get-ChildItem x64\Release | Select-Object Name }
 
       - uses: actions/upload-artifact@v4
         with:
@@ -107,4 +110,6 @@ jobs:
           tag_name: build-${{ github.run_number }}
           name: UU截图 build ${{ github.run_number }}
           body: UU截图：截图标注、截图翻译、剪切板历史。下载 exe 直接运行即可。
-          files: x64/Release/UUjietu.exe
+          files: |
+            x64/Release/UUjietu.exe
+            x64/Release/UUjietu.map

@@ -62,6 +62,7 @@ private:
 	void groupMenu(int row, const std::wstring& label);
 	// 连问两遍，两遍都点"是"才算数。重命名、删除分组这种改了就回不去的操作用
 	bool confirmTwice(const std::wstring& first, const std::wstring& second);
+	bool confirmOnce(const std::wstring& text);
 	void onWheel(float space);
 	void onKey(UINT key);
 	// 文本框里的字变了
@@ -131,6 +132,12 @@ private:
 	int dockEdge{ 0 };
 	bool mouseEntered{ false };
 	int outTicks{ 0 }, graceTicks{ 0 };
+	// 贴边面板滑进 / 滑出的动画：窗口在 from 和 to 两个位置之间挪，animStep 是走到第几步了
+	bool animOut{ false };
+	int animStep{ 0 };
+	POINT animFrom{ 0, 0 }, animTo{ 0, 0 };
+	// 屏幕边缘外面、刚好看不见的那个位置（base 是贴边停好的位置）
+	POINT hiddenPos(POINT base) const;
 	// 缩略图，按记录 id 缓存。只活在这个窗口的生命期里（窗口全关掉时 D2D 设备会被销毁）
 	std::unordered_map<long long, Microsoft::WRL::ComPtr<ID2D1Bitmap1>> thumbs;
 };

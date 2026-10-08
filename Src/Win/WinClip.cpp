@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cwctype>
 #include <cstdlib>
+#include <cmath>
 #include <ctime>
 #include "WinClip.h"
 #include "WinCap.h"
@@ -12,7 +13,8 @@ using Microsoft::WRL::ComPtr;
 
 namespace {
 	std::unique_ptr<WinClip> winClip;
-	constexpr UINT timerDock{ 1 }, timerToast{ 2 };
+	constexpr UINT timerDock{ 1 }, timerToast{ 2 }, timerAnim{ 3 };
+	constexpr int animSteps{ 9 };   //滑动动画走几步，一步 15 毫秒
 	const wchar_t* clipTabKeys[5]{ L"clip.all", L"clip.text", L"clip.image", L"clip.files", L"clip.pinned" };
 
 	// —— 贴边监视：隔一小会儿看一眼光标是不是顶在设定的那条屏幕边上 ——
@@ -28,7 +30,7 @@ namespace {
 		auto& rc = mi.rcMonitor;
 		// 只认边的中间那一段：四个角上有关闭按钮、开始菜单、显示桌面这些，顶过去不该弹面板
 		auto inMiddle = [](LONG val, LONG from, LONG to) {
-			const LONG margin = (to - from) * 15 / 100;
+			const LONG margin = (to - from) * 8 / 100;
 			return val >= from + margin && val <= to - margin;
 		};
 		POINT outside{ pt };
@@ -61,7 +63,7 @@ namespace {
 		QUERY_USER_NOTIFICATION_STATE state{};
 		if (SUCCEEDED(SHQueryUserNotificationState(&state)) && (state == QUNS_BUSY
 			|| state == QUNS_RUNNING_D3D_FULL_SCREEN || state == QUNS_PRESENTATION_MODE)) return;
-		// 连着两次都在边上才算，光标只是划过去不触发
+		// 连着两次（约 0.1 秒）都在边上才算，光标只是划过去不触发
 		if (++dockHits < 2) return;
 		dockHits = 0;
 		dockArmed = false;
@@ -146,6 +148,13 @@ WinClip::WinClip(HWND prevHwnd, int mode, int edge) : Ling::WinBase(), prevHwnd{
 	if (posY + winPxH > work.bottom) posY = work.bottom - winPxH;
 	x = (std::max)(posX, (int)work.left);
 	y = (std::max)(posY, (int)work.top);
+	if (dockEdge != 0) {
+		// 贴边的先摆在屏幕外面，显示出来之后再滑进来（见 onCreated / onTick）
+		animTo = POINT{ x, y };
+		animFrom = hiddenPos(animTo);
+		x = animFrom.x;
+		y = animFrom.y;
+	}
 
 	onMouseDown.add([this](POINT pos, bool isRight) { onDown(pos, isRight); });
 	onMouseMove.add([this](POINT pos) { onMove(pos); });
@@ -203,7 +212,7 @@ void WinClip::applyDock()
 {
 	const int edge = Setting::get()->getDockEdge();
 	if (edge != 0 && !dockTimer) {
-		dockTimer = SetTimer(nullptr, 0, 200, onDockTimer);
+		dockTimer = SetTimer(nullptr, 0, 50, onDockTimer);
 	}
 	else if (edge == 0 && dockTimer) {
 		KillTimer(nullptr, dockTimer);
@@ -220,10 +229,30 @@ void WinClip::dispose()
 	winClip.reset();
 }
 
+POINT WinClip::hiddenPos(POINT base) const
+{
+	POINT pos{ base };
+	if (dockEdge == 1) pos.x -= (LONG)w;
+	else if (dockEdge == 2) pos.y -= (LONG)h;
+	else if (dockEdge == 3) pos.x += (LONG)w;
+	else if (dockEdge == 4) pos.y += (LONG)h;
+	return pos;
+}
+
 void WinClip::requestClose()
 {
 	if (closing) return;
 	closing = true;
+	// 贴边的先滑回屏幕外面再关（动画走完由 onTick 来关）
+	RECT rect{};
+	if (dockEdge != 0 && created && hwnd && GetWindowRect(hwnd, &rect)) {
+		animOut = true;
+		animStep = 0;
+		animFrom = POINT{ rect.left, rect.top };
+		animTo = hiddenPos(animFrom);
+		setTimer(15, timerAnim);
+		return;
+	}
 	Ling::App::get()->dq.TryEnqueue([]() {
 		if (winClip && winClip->hwnd) winClip->close();
 	});
@@ -262,6 +291,8 @@ void WinClip::onCreated()
 		// 贴边滑出来的不抢焦点：用户多半正在聊天窗口里打字，面板只是凑过来给他点一下。
 		// 既然不拿焦点，也就等不到失焦，改由定时器看光标移开没有
 		ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+		animStep = 0;
+		setTimer(15, timerAnim);
 		setTimer(200, timerDock);
 	}
 	else {
@@ -402,10 +433,10 @@ void WinClip::rebuild()
 			break;
 		}
 	}
-	// 标签。话术页：第 r 排列的是已选的前 r 级下面的子分组，后面一个"＋"新建；
-	// 最多三级，所以最多三排。一个分组都不选时列表里是全部话术。剪切板页就一排，按类型分
-	tabRows = mode == Phrase ? (std::min)((int)path.size() + 1, 3) : 1;
-	for (int row = 0; row < tabRows; row++) {
+	// 标签。话术页：第 r 排列的是已选的前 r 级下面的子分组，最多三级所以最多三排。
+	// 一个分组都不选时列表里是全部话术。剪切板页就一排，按类型分
+	tabRows = 1;
+	for (int row = 0; row < 3; row++) {
 		float left = 10.f * dpi;
 		auto addTab = [&](Tab::Kind kind, const std::wstring& label, bool selected) {
 			Tab item;
@@ -418,16 +449,21 @@ void WinClip::rebuild()
 			left = item.right;
 			tabs.push_back(std::move(item));
 		};
-		if (mode == Phrase) {
-			const bool hasSel = (int)path.size() > row;
-			for (auto& name : history->getChildGroups(groupPrefix(row))) {
-				addTab(Tab::Kind::Item, name, hasSel && path[row] == name);
-			}
-			addTab(Tab::Kind::Plus, L"＋", false);
-		}
-		else {
+		if (mode != Phrase) {
 			for (int i = 0; i < 5; i++) addTab(Tab::Kind::Item, Lang::get(clipTabKeys[i]), i == tab);
+			break;
 		}
+		// 第 row 排要等前 row 级都选了才有；下面没有子分组的那一级不占一排
+		if (row > (int)path.size()) break;
+		auto children = history->getChildGroups(groupPrefix(row));
+		if (children.empty()) {
+			// 一个分组都还没有：给个入口。有了分组之后，新建都走分组上的右键菜单
+			if (row == 0) addTab(Tab::Kind::Plus, Lang::get(L"clip.addGroupTab"), false);
+			break;
+		}
+		tabRows = row + 1;
+		const bool hasSel = (int)path.size() > row;
+		for (auto& name : children) addTab(Tab::Kind::Item, name, hasSel && path[row] == name);
 	}
 
 	const auto key = toLower(query);
@@ -838,6 +874,7 @@ void WinClip::onDown(POINT pos, bool isRight)
 		refresh();
 	}
 	else if (hit == Hit::Clear) {
+		if (!confirmOnce(Lang::get(L"clip.clearAsk"))) return;
 		history->clear(); //onChanged 里会重建列表并重画
 	}
 	else if (hit == Hit::AddClip) {
@@ -845,8 +882,9 @@ void WinClip::onDown(POINT pos, bool isRight)
 	}
 	else if (hit == Hit::Btn0) {
 		const auto id = rows[index].item->id;
-		if (mode == Phrase) history->removePhrase(id);
-		else history->remove(id);
+		// 话术是特意存下来的，删之前问一句；剪切板历史本来就是流水，直接删
+		if (mode != Phrase) history->remove(id);
+		else if (confirmOnce(Lang::get(L"clip.delPhraseAsk"))) history->removePhrase(id);
 	}
 	else if (hit == Hit::Btn1) {
 		const auto id = rows[index].item->id;
@@ -903,6 +941,17 @@ bool WinClip::confirmTwice(const std::wstring& first, const std::wstring& second
 	return ok;
 }
 
+bool WinClip::confirmOnce(const std::wstring& text)
+{
+	modal = true;
+	const bool ok = MessageBox(hwnd, text.data(), Lang::get(L"about.sysTip").data(),
+		MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2 | MB_TOPMOST) == IDYES;
+	modal = false;
+	SetForegroundWindow(hwnd);
+	SetFocus(hwnd);
+	return ok;
+}
+
 void WinClip::groupMenu(int row, const std::wstring& label)
 {
 	auto history = ClipHistory::get();
@@ -913,8 +962,12 @@ void WinClip::groupMenu(int row, const std::wstring& label)
 	const auto it = std::find(siblings.begin(), siblings.end(), label);
 	if (it == siblings.end()) return;
 	const size_t at = it - siblings.begin();
-	enum { cmdRename = 1, cmdLeft, cmdRight, cmdDelete };
+	enum { cmdRename = 1, cmdLeft, cmdRight, cmdDelete, cmdAdd, cmdAddChild };
 	auto menu = CreatePopupMenu();
+	AppendMenu(menu, MF_STRING, cmdAdd, Lang::get(L"clip.menuAdd").data());
+	// 最多三级，第三级下面不能再建了
+	if (row < 2) AppendMenu(menu, MF_STRING, cmdAddChild, Lang::get(L"clip.menuAddChild").data());
+	AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
 	AppendMenu(menu, MF_STRING, cmdRename, Lang::get(L"clip.menuRename").data());
 	AppendMenu(menu, MF_STRING | (at == 0 ? MF_GRAYED : 0), cmdLeft, Lang::get(L"clip.menuLeft").data());
 	AppendMenu(menu, MF_STRING | (at + 1 >= siblings.size() ? MF_GRAYED : 0), cmdRight, Lang::get(L"clip.menuRight").data());
@@ -930,7 +983,12 @@ void WinClip::groupMenu(int row, const std::wstring& label)
 	modal = false;
 	SetFocus(hwnd);
 	const auto head = parent.empty() ? L"" : parent + L"/";
-	if (cmd == cmdRename) {
+	if (cmd == cmdAdd || cmd == cmdAddChild) {
+		// 同级：建在它的上一级下面；下级：建在它自己下面
+		inputParent = cmd == cmdAdd ? parent : full;
+		beginInput(Input::Group);
+	}
+	else if (cmd == cmdRename) {
 		inputParent = parent;
 		inputOld = label;
 		beginInput(Input::Rename, 0, label);
@@ -1049,6 +1107,22 @@ void WinClip::onTick(UINT id)
 		refresh();
 		return;
 	}
+	if (id == timerAnim) {
+		// 滑进来先快后慢，滑出去先慢后快，看着像被弹出来 / 吸回去
+		const float t = (std::min)(1.f, ++animStep / (float)animSteps);
+		const float e = animOut ? t * t : 1.f - (1.f - t) * (1.f - t) * (1.f - t);
+		const int posX = animFrom.x + (int)std::lround((animTo.x - animFrom.x) * e);
+		const int posY = animFrom.y + (int)std::lround((animTo.y - animFrom.y) * e);
+		SetWindowPos(hwnd, nullptr, posX, posY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+		if (t < 1.f) return;
+		killTimer(timerAnim);
+		if (animOut) {
+			Ling::App::get()->dq.TryEnqueue([]() {
+				if (winClip && winClip->hwnd) winClip->close();
+			});
+		}
+		return;
+	}
 	if (id != timerDock || closing || modal) return;
 	// 正按着鼠标（多半是在拖边改大小，光标会跑到窗口外面去）：不收
 	if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) {
@@ -1102,8 +1176,8 @@ void WinClip::onKey(UINT key)
 		auto history = ClipHistory::get();
 		if (!history) return;
 		const auto id = rows[selRow].item->id;
-		if (mode == Phrase) history->removePhrase(id);
-		else history->remove(id);
+		if (mode != Phrase) history->remove(id);
+		else if (confirmOnce(Lang::get(L"clip.delPhraseAsk"))) history->removePhrase(id);
 	}
 }
 

@@ -9,6 +9,7 @@
 #include "./Win/WinSetting.h"
 #include "./Win/WinClip.h"
 #include "ClipHistory.h"
+#include "Log.h"
 
 std::unique_ptr<App> app;
 
@@ -105,6 +106,7 @@ App::App()
     // 录制中直接退出会让编码线程和 D3D 设备一起卡住，退出前先把录制停掉
     app->onBeforeQuit.add([]() { WinCap::stopIfRecording(); });
     Setting::init();
+    Log::init();
     Lang::init();
     if (app->args[L"--auto-quit"] == L"true") {
         WinCap::init();

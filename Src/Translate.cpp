@@ -15,6 +15,7 @@
 #include "Translate.h"
 #include "Setting.h"
 #include "Lang.h"
+#include "Log.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -356,6 +357,7 @@ namespace {
 			return;
 		}
 		catch (...) {
+			Log::exception(L"translate (microsoft)");
 			// 令牌可能是被服务端提前作废的，清掉，下次重新要
 			std::lock_guard lock{ tokenMutex };
 			msToken.clear();
@@ -364,6 +366,7 @@ namespace {
 			googleTranslate(client, target, blocks);
 		}
 		catch (...) {
+			Log::exception(L"translate (google)");
 			throw WorkError{ L"translate.netError" };
 		}
 	}
@@ -397,6 +400,7 @@ namespace {
 			errKey = e.key;
 		}
 		catch (...) {
+			Log::exception(L"ocr / translate");
 			errKey = L"translate.failed";
 		}
 		// Lang 和回调里要碰的窗口都只在 UI 线程上用
