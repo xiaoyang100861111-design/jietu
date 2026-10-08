@@ -201,6 +201,29 @@ void Setting::setClipEnabled(bool val)
     save();
 }
 
+std::pair<float, float> Setting::getClipSize()
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) return { 420.f, 0.f };
+    auto w = static_cast<float>(common.GetNamedNumber(L"clipW", 420.));
+    auto h = static_cast<float>(common.GetNamedNumber(L"clipH", 0.));
+    if (w < 300.f || w > 4000.f) w = 420.f;
+    if (h < 260.f || h > 4000.f) h = 0.f;
+    return { w, h };
+}
+
+void Setting::setClipSize(float w, float h)
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) {
+        common = JsonObject();
+        configObj.SetNamedValue(L"common", common);
+    }
+    common.SetNamedValue(L"clipW", JsonValue::CreateNumberValue(w));
+    common.SetNamedValue(L"clipH", JsonValue::CreateNumberValue(h));
+    save();
+}
+
 int Setting::getDockEdge()
 {
     auto common = configObj.GetNamedObject(L"common", nullptr);

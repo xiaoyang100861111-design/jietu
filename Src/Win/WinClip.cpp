@@ -11,8 +11,7 @@ using Microsoft::WRL::ComPtr;
 
 namespace {
 	std::unique_ptr<WinClip> winClip;
-	constexpr float winW{ 420.f }, winH{ 580.f };   //逻辑像素
-	constexpr UINT timerDock{ 1 }, timerToast{ 2 };
+	constexpr UINT timerDock{ 1 }, timerToast{ 2 }, timerCaret{ 3 };
 	const wchar_t* clipTabKeys[5]{ L"clip.all", L"clip.text", L"clip.image", L"clip.files", L"clip.pinned" };
 
 	// —— 贴边监视：隔一小会儿看一眼光标是不是顶在设定的那条屏幕边上 ——
@@ -114,12 +113,17 @@ namespace {
 WinClip::WinClip(HWND prevHwnd, int mode, int edge) : Ling::WinBase(), prevHwnd{ prevHwnd }, mode{ mode }, dockEdge{ edge }
 {
 	setTitle(L"UU截图");
-	setSize(winW, winH);
 	POINT cursor{};
 	GetCursorPos(&cursor);
 	MONITORINFO mi{ sizeof(MONITORINFO) };
 	GetMonitorInfo(MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST), &mi);
 	auto& work = mi.rcWork;
+	// 尺寸用上次拖出来的；高度没调过就从上到下占满工作区。都不超过工作区
+	auto [savedW, savedH] = Setting::get()->getClipSize();
+	setSize(savedW, savedH > 0.f ? savedH : 600.f);
+	const float workW = (float)(work.right - work.left), workH = (float)(work.bottom - work.top);
+	if (savedH <= 0.f || h > workH) h = workH;
+	if (w > workW) w = workW;
 	const int winPxW = (int)w, winPxH = (int)h;
 	int posX{ 0 }, posY{ 0 };
 	if (dockEdge == 0) {
@@ -148,10 +152,26 @@ WinClip::WinClip(HWND prevHwnd, int mode, int edge) : Ling::WinBase(), prevHwnd{
 	onKeyDown.add([this](UINT key) { onKey(key); });
 	onChar.add([this](UINT code) { onCharInput(code); });
 	onTimer.add([this](UINT id) { onTick(id); });
+	onFocus.add([this]() {
+		focused = true;
+		caretOn = true;
+		refresh();
+	});
 	// 点到别处去了：面板就是个临时弹层，直接收掉
-	onBlur.add([this]() { requestClose(); });
+	onBlur.add([this]() {
+		focused = false;
+		requestClose();
+	});
+	// 拖边改了大小：列表能显示的行数变了，滚动位置要重新夹一下
+	onSizeChanged.add([this]() {
+		if (!created) return;
+		resized = true;
+		clampScroll();
+		refresh();
+	});
 	// 同 WinSetting：窗口句柄已经没了，C++ 对象推迟到下一轮消息循环再放
-	onDestroy.add([]() {
+	onDestroy.add([this]() {
+		if (resized && dpi > 0.f) Setting::get()->setClipSize(w / dpi, h / dpi);
 		if (auto history = ClipHistory::get()) history->onChanged = nullptr;
 		Ling::App::get()->dq.TryEnqueue([]() { winClip.reset(); });
 	});
@@ -227,6 +247,8 @@ void WinClip::onCreated()
 		winClip->rebuild();
 		winClip->refresh();
 	};
+	created = true;
+	setTimer(530, timerCaret);
 	if (dockEdge != 0) {
 		// 贴边滑出来的不抢焦点：用户多半正在聊天窗口里打字，面板只是凑过来给他点一下。
 		// 既然不拿焦点，也就等不到失焦，改由定时器看光标移开没有
@@ -243,8 +265,17 @@ void WinClip::onCreated()
 
 void WinClip::onMinMaxInfo(MINMAXINFO* mmi)
 {
-	mmi->ptMinTrackSize.x = 1;
-	mmi->ptMinTrackSize.y = 1;
+	// 再小标签和按钮就挤不下了
+	mmi->ptMinTrackSize.x = (LONG)(300.f * dpi);
+	mmi->ptMinTrackSize.y = (LONG)(260.f * dpi);
+}
+
+LRESULT WinClip::onHitTest(const POINT pos)
+{
+	// 进来的是屏幕坐标，borderHitTest 认的是窗口内的坐标
+	POINT pt{ pos };
+	ScreenToClient(hwnd, &pt);
+	return borderHitTest(pt);
 }
 
 float WinClip::listTop() const
@@ -469,19 +500,30 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 	// 第二排：搜索框。没有真的输入框控件：按键直接进字符串，这里把它画出来，末尾补一条竖线当光标。
 	// 新建分组 / 改备注名时也借它来输入
 	auto searchRect = D2D1::RectF(pad, 44.f * dpi, w - pad, 76.f * dpi);
-	const bool typing = input != Input::Search || !query.empty();
+	auto& typed = input == Input::Search ? query : inputText;
+	// 有焦点（能打字）或者里面有字时边框亮起来
+	const bool active = focused || input != Input::Search || !typed.empty();
 	brush->SetColor(D2D1::ColorF(0xFFFFFF));
 	ctx->FillRoundedRectangle(D2D1::RoundedRect(searchRect, 6.f * dpi, 6.f * dpi), brush.Get());
-	brush->SetColor(D2D1::ColorF(typing ? theme : 0xDDDDDD));
+	brush->SetColor(D2D1::ColorF(active ? theme : 0xDDDDDD));
 	ctx->DrawRoundedRectangle(D2D1::RoundedRect(searchRect, 6.f * dpi, 6.f * dpi), brush.Get(), dpi);
 	auto searchText = D2D1::RectF(searchRect.left + 10.f * dpi, searchRect.top, searchRect.right - 10.f * dpi, searchRect.bottom);
-	auto& typed = input == Input::Search ? query : inputText;
+	float caretX = searchText.left;
 	if (typed.empty()) {
 		auto hint = input == Input::Group ? L"clip.inputGroup" : input == Input::Title ? L"clip.inputTitle" : L"clip.search";
-		drawText(ctx, Lang::get(hint), 13.f, searchText, 0xAAAAAA, false, true);
+		// 提示文字往右让一点，给光标留个位置
+		auto hintRect = searchText;
+		hintRect.left += 4.f * dpi;
+		drawText(ctx, Lang::get(hint), 13.f, hintRect, 0xAAAAAA, false, true);
 	}
 	else {
-		drawText(ctx, typed + L"|", 13.f, searchText, 0x333333, false, true);
+		drawText(ctx, typed, 13.f, searchText, 0x333333, false, true);
+		caretX = (std::min)(searchText.left + textWidth(typed, 13.f) + dpi, searchText.right);
+	}
+	// 光标：跟在已输入的字后面，一亮一灭
+	if (focused && caretOn) {
+		brush->SetColor(D2D1::ColorF(0x333333));
+		ctx->FillRectangle(D2D1::RectF(caretX, searchRect.top + 8.f * dpi, caretX + (std::max)(1.f, dpi), searchRect.bottom - 8.f * dpi), brush.Get());
 	}
 
 	// 分类 / 分组标签，一排或几排
@@ -865,7 +907,19 @@ void WinClip::onTick(UINT id)
 		refresh();
 		return;
 	}
+	if (id == timerCaret) {
+		// 焦点状态顺便对一下表：有些拿到焦点的路径不发 WM_SETFOCUS 给我们
+		focused = GetFocus() == hwnd;
+		caretOn = !caretOn;
+		if (focused) refresh();
+		return;
+	}
 	if (id != timerDock || closing) return;
+	// 正按着鼠标（多半是在拖边改大小，光标会跑到窗口外面去）：不收
+	if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) {
+		outTicks = 0;
+		return;
+	}
 	// 贴边面板：光标移开一会儿就收回去。正在输入分组名 / 备注名时不收
 	POINT cursor{};
 	RECT rect{};
@@ -929,6 +983,7 @@ void WinClip::onCharInput(UINT code)
 {
 	// 控制字符（退格、回车、Esc 这些）在 onKey 里处理过了，这里只收能显示的字
 	if (closing || code < 32 || code == 127) return;
+	caretOn = true;
 	if (input != Input::Search) {
 		if (inputText.size() < 30) inputText += static_cast<wchar_t>(code);
 		refresh();

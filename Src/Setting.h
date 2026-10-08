@@ -25,6 +25,9 @@ public:
 	bool getClipEnabled();
 	void setClipEnabled(bool val);
 	// 快捷话术面板贴边：0 关闭，1 左，2 上，3 右，4 下。鼠标顶到那条屏幕边上面板就滑出来
+	// 话术 / 剪切板面板的尺寸（逻辑像素）。高度 0 表示没调过：占满屏幕工作区的整个高度
+	std::pair<float, float> getClipSize();
+	void setClipSize(float w, float h);
 	int getDockEdge();
 	void setDockEdge(int val);
 	int getMouseTrigger();

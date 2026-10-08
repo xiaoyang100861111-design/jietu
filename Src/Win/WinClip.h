@@ -44,6 +44,8 @@ private:
 	void onCreated() override;
 	void layout() override;
 	void onMinMaxInfo(MINMAXINFO* mmi) override;
+	// 四条边可以拖着改大小，改完的尺寸关窗时记进配置
+	LRESULT onHitTest(const POINT pos) override;
 	// 按当前的页签、分类和搜索词重新筛一遍
 	void rebuild();
 	void setMode(int val);
@@ -101,6 +103,10 @@ private:
 	std::wstring inputParent; // 新建分组时建在哪个分组下面（空 = 一级分组）
 	std::wstring toastText;
 	bool closing{ false };
+	// 输入框的光标：窗口有键盘焦点时才画，靠定时器一亮一灭
+	bool focused{ false }, caretOn{ true };
+	// 用户拖过窗口边改了大小（建窗口时那一下 WM_SIZE 不算）
+	bool created{ false }, resized{ false };
 	// 贴边滑出的：0 不是。鼠标移开就收，靠定时器看光标位置
 	int dockEdge{ 0 };
 	bool mouseEntered{ false };
