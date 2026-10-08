@@ -29,7 +29,7 @@ private:
 	// 搜索框下面的分类 / 分组标签。left、right 是窗口坐标。
 	// 剪切板页只有一排（按类型分）；话术页每一级分组一排，选中上一级才出现下一级，最多三排
 	struct Tab {
-		enum class Kind { All, Item, Plus };
+		enum class Kind { Item, Plus };
 		Kind kind{ Kind::Item };
 		std::wstring label;
 		float left{ 0.f }, right{ 0.f };
@@ -39,7 +39,7 @@ private:
 	// 光标落在什么东西上。Btn0~2 是一行右边的小按钮，从右往左数
 	enum class Hit { None, Mode, Tab, Clear, Row, Btn0, Btn1, Btn2, AddClip };
 	// 搜索框现在在收什么：平时是搜索词，新建分组 / 改备注名时临时借用它
-	enum class Input { Search, Group, Title };
+	enum class Input { Search, Group, Title, Rename };
 	WinClip(HWND prevHwnd, int mode, int edge);
 	void onCreated() override;
 	void layout() override;
@@ -57,6 +57,11 @@ private:
 	Hit hitTest(POINT pos, int& index);
 	void onDown(POINT pos, bool isRight);
 	void onMove(POINT pos);
+	void onUp(POINT pos, bool isRight);
+	// 右键点分组弹出的菜单：重命名 / 左移 / 右移 / 删除
+	void groupMenu(int row, const std::wstring& label);
+	// 连问两遍，两遍都点"是"才算数。重命名、删除分组这种改了就回不去的操作用
+	bool confirmTwice(const std::wstring& first, const std::wstring& second);
 	void onWheel(float space);
 	void onKey(UINT key);
 	void onCharInput(UINT code);
@@ -100,7 +105,16 @@ private:
 	Input input{ Input::Search };
 	std::wstring inputText;  // 新建分组 / 改备注名时正在输入的字
 	long long inputId{ 0 };  // 改备注名时是哪一条
-	std::wstring inputParent; // 新建分组时建在哪个分组下面（空 = 一级分组）
+	std::wstring inputParent; // 新建 / 重命名分组时，它的上一级分组（空 = 一级分组）
+	std::wstring inputOld;    // 重命名分组时它原来的名字
+	// 正开着菜单 / 确认框：这期间面板会失焦，但不能因此关掉
+	bool modal{ false };
+	// 在分组标签上按下了左键还没松：松开时没拖动过算点击（选中 / 取消选中），
+	// 拖到同一排的另一个分组上就是和它换位置
+	bool tabPressed{ false }, tabDragged{ false };
+	int pressRow{ 0 };
+	std::wstring pressLabel;
+	POINT pressPos{ 0, 0 };
 	std::wstring toastText;
 	bool closing{ false };
 	// 输入框的光标：窗口有键盘焦点时才画，靠定时器一亮一灭

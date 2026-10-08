@@ -115,6 +115,9 @@ void ToolSub::beginTool(const std::wstring& id)
 	// 而这个值会直接当线宽/字号喂给 D2D，超出范围要么看不见要么慢得离谱
 	sliderVal = std::clamp(setting->getToolNum(id, cfg->key, cfg->def), cfg->min, cfg->max);
 	// colors[selectColorIndex] 那几处都不做边界检查，越界就读到界外了
+	// 色表的第一格每个工具可以自定义（设置窗口里用调色板 / 十六进制色值选的），没设过就是原来的红
+	const auto custom = static_cast<UINT32>(setting->getToolNum(id, L"color0", static_cast<float>(0xCF1322))) & 0xFFFFFF;
+	colors[0] = (custom << 8) | 0xFF;
 	auto idx = static_cast<UINT>(setting->getToolNum(id, L"colorIndex", 0.f));
 	selectColorIndex = idx < colors.size() ? idx : 0;
 }

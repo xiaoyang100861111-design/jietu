@@ -89,7 +89,7 @@ void WinSetting::onCreated()
 }
 void WinSetting::initMenuItems(Ling::Node* menuBox)
 {
-	for (size_t i = 0; i < 3; i++)
+	for (size_t i = 0; i < 4; i++)
 	{
 		auto menuItem = menuBox->makeChild<Ling::Button>();
 		menuItem->setFontSize(14.f);
@@ -110,6 +110,10 @@ void WinSetting::initMenuItems(Ling::Node* menuBox)
 			else if (i == 2) {
 				menuItem->setText(Lang::get(L"setting.about"));
 			}
+			else {
+				// 不是一页设置：点了直接用资源管理器打开配置目录，方便整个拷到别的电脑上
+				menuItem->setText(Lang::get(L"setting.dataDir"));
+			}
 		}
 		menuItem->onClick.add([this](auto menuItem) {this->onMenuItemClick(menuItem);});
 		menus.push_back(menuItem);
@@ -118,6 +122,10 @@ void WinSetting::initMenuItems(Ling::Node* menuBox)
 void WinSetting::onMenuItemClick(Ling::Button* menuItem)
 {
 	auto index = Ling::Util::getIndex(menus, menuItem);
+	if (index == 3) {
+		ShellExecute(hwnd, L"open", Setting::get()->getDataPath().wstring().data(), nullptr, nullptr, SW_SHOWNORMAL);
+		return;
+	}
 	if (index < 0 || index == menuIndex) return;
 	// 通用设置里的语言下拉框是挂在 body 上的（要能盖住下面的控件），content 被换掉
 	// 它不会跟着消失，所以切菜单之前先收掉

@@ -1,6 +1,7 @@
 #include "pch.h"
 #include <algorithm>
 #include <cwctype>
+#include <cstdlib>
 #include <ctime>
 #include "WinClip.h"
 #include "WinCap.h"
@@ -148,6 +149,7 @@ WinClip::WinClip(HWND prevHwnd, int mode, int edge) : Ling::WinBase(), prevHwnd{
 
 	onMouseDown.add([this](POINT pos, bool isRight) { onDown(pos, isRight); });
 	onMouseMove.add([this](POINT pos) { onMove(pos); });
+	onMouseUp.add([this](POINT pos, bool isRight) { onUp(pos, isRight); });
 	onMouseWheel.add([this](POINT pos, float space) { onWheel(space); });
 	onKeyDown.add([this](UINT key) { onKey(key); });
 	onChar.add([this](UINT code) { onCharInput(code); });
@@ -160,7 +162,7 @@ WinClip::WinClip(HWND prevHwnd, int mode, int edge) : Ling::WinBase(), prevHwnd{
 	// 点到别处去了：面板就是个临时弹层，直接收掉
 	onBlur.add([this]() {
 		focused = false;
-		requestClose();
+		if (!modal) requestClose(); //菜单、确认框开着时也会失焦，那不算
 	});
 	// 拖边改了大小：列表能显示的行数变了，滚动位置要重新夹一下
 	onSizeChanged.add([this]() {
@@ -353,8 +355,8 @@ void WinClip::rebuild()
 			break;
 		}
 	}
-	// 标签。话术页：第 r 排列的是已选的前 r 级下面的子分组，前面一个"全部"、后面一个"＋"新建；
-	// 最多三级，所以最多三排。剪切板页就一排，按类型分
+	// 标签。话术页：第 r 排列的是已选的前 r 级下面的子分组，后面一个"＋"新建；
+	// 最多三级，所以最多三排。一个分组都不选时列表里是全部话术。剪切板页就一排，按类型分
 	tabRows = mode == Phrase ? (std::min)((int)path.size() + 1, 3) : 1;
 	for (int row = 0; row < tabRows; row++) {
 		float left = 10.f * dpi;
@@ -371,7 +373,6 @@ void WinClip::rebuild()
 		};
 		if (mode == Phrase) {
 			const bool hasSel = (int)path.size() > row;
-			addTab(Tab::Kind::All, Lang::get(L"clip.all"), !hasSel);
 			for (auto& name : history->getChildGroups(groupPrefix(row))) {
 				addTab(Tab::Kind::Item, name, hasSel && path[row] == name);
 			}
@@ -510,7 +511,8 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 	auto searchText = D2D1::RectF(searchRect.left + 10.f * dpi, searchRect.top, searchRect.right - 10.f * dpi, searchRect.bottom);
 	float caretX = searchText.left;
 	if (typed.empty()) {
-		auto hint = input == Input::Group ? L"clip.inputGroup" : input == Input::Title ? L"clip.inputTitle" : L"clip.search";
+		auto hint = input == Input::Group || input == Input::Rename ? L"clip.inputGroup"
+			: input == Input::Title ? L"clip.inputTitle" : L"clip.search";
 		// 提示文字往右让一点，给光标留个位置
 		auto hintRect = searchText;
 		hintRect.left += 4.f * dpi;
@@ -738,6 +740,24 @@ void WinClip::onMove(POINT pos)
 {
 	int index{ -1 };
 	auto hit = hitTest(pos, index);
+	if (tabPressed) {
+		// 松开鼠标的那一下如果落在窗口外面，这边收不到，靠按键状态兜一下
+		if (!(GetAsyncKeyState(VK_LBUTTON) & 0x8000)) {
+			tabPressed = false;
+		}
+		else {
+			if (std::abs(pos.x - pressPos.x) > (int)(6 * dpi)) tabDragged = true;
+			// 拖到同一排的另一个分组上：两个换位置。被拖的那个还是它，接着拖可以一路换过去
+			if (tabDragged && hit == Hit::Tab && tabs[index].kind == Tab::Kind::Item
+				&& tabs[index].row == pressRow && tabs[index].label != pressLabel) {
+				auto parent = groupPrefix(pressRow);
+				auto head = parent.empty() ? L"" : parent + L"/";
+				auto other = tabs[index].label;
+				if (auto history = ClipHistory::get()) history->swapGroups(head + pressLabel, head + other);
+				return; //swapGroups 触发的 onChanged 已经重建并重画了
+			}
+		}
+	}
 	if (hit == hover && index == hoverIndex) return;
 	hover = hit;
 	hoverIndex = index;
@@ -757,7 +777,7 @@ void WinClip::onDown(POINT pos, bool isRight)
 		return;
 	}
 	if (hit == Hit::Tab && mode == Phrase) {
-		auto item = tabs[index]; //下面会重建 tabs，先抄一份出来
+		auto item = tabs[index]; //下面可能会重建 tabs，先抄一份出来
 		if (item.kind == Tab::Kind::Plus) {
 			// 在这一排对应的那一级下面新建分组
 			if (!isRight) {
@@ -766,24 +786,19 @@ void WinClip::onDown(POINT pos, bool isRight)
 			}
 			return;
 		}
-		if (item.kind == Tab::Kind::Item && isRight) {
-			// 右键点分组：删掉它和它下面的子分组（话术挪到上一级）
-			auto parent = groupPrefix(item.row);
-			auto full = parent.empty() ? item.label : parent + L"/" + item.label;
-			if ((int)path.size() > item.row && path[item.row] == item.label) path.resize(item.row);
-			history->removeGroup(full);
+		if (isRight) {
+			groupMenu(item.row, item.label);
 			return;
 		}
-		if (isRight) return;
-		// 左键：选中这一级（"全部"则退回上一级），更深的选择一并清掉
-		path.resize((std::min)((int)path.size(), item.row));
-		if (item.kind == Tab::Kind::Item) path.push_back(item.label);
-		scrollY = 0.f;
-		selRow = 0;
-		rebuild();
-		refresh();
+		// 左键按下先记着，松开时再决定是点击还是拖动换位置（见 onMove / onUp）
+		tabPressed = true;
+		tabDragged = false;
+		pressRow = item.row;
+		pressLabel = item.label;
+		pressPos = pos;
 		return;
 	}
+	tabPressed = false;
 	if (isRight) return;
 	if (hit == Hit::Mode) {
 		setMode(index);
@@ -830,6 +845,81 @@ void WinClip::onDown(POINT pos, bool isRight)
 		auto shown = next.empty() ? Lang::get(L"clip.ungrouped") : next;
 		for (size_t pos = 0; (pos = shown.find(L'/', pos)) != std::wstring::npos; pos += 3) shown.replace(pos, 1, L" › ");
 		toast(Lang::get(L"clip.movedTo") + shown);
+	}
+}
+
+void WinClip::onUp(POINT pos, bool isRight)
+{
+	if (isRight || !tabPressed) return;
+	tabPressed = false;
+	if (tabDragged || closing) return;
+	// 没拖动 = 点击：选中这个分组；点的是已经选中的那个则取消选中（回到上一级）。
+	// 比它更深的选择一并清掉
+	const bool wasSelected = (int)path.size() > pressRow && path[pressRow] == pressLabel;
+	path.resize((std::min)((int)path.size(), pressRow));
+	if (!wasSelected) path.push_back(pressLabel);
+	scrollY = 0.f;
+	selRow = 0;
+	rebuild();
+	refresh();
+}
+
+bool WinClip::confirmTwice(const std::wstring& first, const std::wstring& second)
+{
+	auto title = Lang::get(L"about.sysTip");
+	const UINT flags = MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2 | MB_TOPMOST;
+	modal = true;
+	const bool ok = MessageBox(hwnd, first.data(), title.data(), flags) == IDYES
+		&& MessageBox(hwnd, second.data(), title.data(), flags) == IDYES;
+	modal = false;
+	SetForegroundWindow(hwnd);
+	SetFocus(hwnd);
+	return ok;
+}
+
+void WinClip::groupMenu(int row, const std::wstring& label)
+{
+	auto history = ClipHistory::get();
+	if (!history) return;
+	const auto parent = groupPrefix(row);
+	const auto full = parent.empty() ? label : parent + L"/" + label;
+	auto siblings = history->getChildGroups(parent);
+	const auto it = std::find(siblings.begin(), siblings.end(), label);
+	if (it == siblings.end()) return;
+	const size_t at = it - siblings.begin();
+	enum { cmdRename = 1, cmdLeft, cmdRight, cmdDelete };
+	auto menu = CreatePopupMenu();
+	AppendMenu(menu, MF_STRING, cmdRename, Lang::get(L"clip.menuRename").data());
+	AppendMenu(menu, MF_STRING | (at == 0 ? MF_GRAYED : 0), cmdLeft, Lang::get(L"clip.menuLeft").data());
+	AppendMenu(menu, MF_STRING | (at + 1 >= siblings.size() ? MF_GRAYED : 0), cmdRight, Lang::get(L"clip.menuRight").data());
+	AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+	AppendMenu(menu, MF_STRING, cmdDelete, Lang::get(L"clip.menuDelete").data());
+	POINT pt{};
+	GetCursorPos(&pt);
+	modal = true;
+	// 菜单的 owner 得在前台，点到菜单外面它才会自己收起来
+	SetForegroundWindow(hwnd);
+	const UINT cmd = TrackPopupMenuEx(menu, TPM_RIGHTBUTTON | TPM_NONOTIFY | TPM_RETURNCMD, pt.x, pt.y, hwnd, nullptr);
+	DestroyMenu(menu);
+	modal = false;
+	SetFocus(hwnd);
+	const auto head = parent.empty() ? L"" : parent + L"/";
+	if (cmd == cmdRename) {
+		inputParent = parent;
+		inputOld = label;
+		beginInput(Input::Rename, 0, label);
+	}
+	else if (cmd == cmdLeft && at > 0) {
+		history->swapGroups(full, head + siblings[at - 1]);
+	}
+	else if (cmd == cmdRight && at + 1 < siblings.size()) {
+		history->swapGroups(full, head + siblings[at + 1]);
+	}
+	else if (cmd == cmdDelete) {
+		if (!confirmTwice(std::format(L"{}\n\n{}", Lang::get(L"clip.delAsk1"), label),
+			std::format(L"{}\n\n{}", Lang::get(L"clip.delAsk2"), label))) return;
+		if ((int)path.size() > row && path[row] == label) path.resize(row);
+		history->removeGroup(full);
 	}
 }
 
@@ -884,6 +974,24 @@ void WinClip::endInput(bool commit)
 			}
 			path.push_back(text);
 		}
+		else if (kind == Input::Rename && !text.empty() && text != inputOld) {
+			auto parent = inputParent;
+			auto old = inputOld;
+			auto oldFull = parent.empty() ? old : parent + L"/" + old;
+			auto ask = std::format(L"{} → {}", old, text);
+			if (confirmTwice(std::format(L"{}\n\n{}", Lang::get(L"clip.renameAsk1"), ask),
+				std::format(L"{}\n\n{}", Lang::get(L"clip.renameAsk2"), ask))) {
+				// 正选着的就是它（或它下面的）：选中的那一级跟着换成新名字
+				const int depth = (int)std::count(oldFull.begin(), oldFull.end(), L'/');
+				const bool onPath = (int)path.size() > depth && groupPrefix(depth + 1) == oldFull;
+				if (history->renameGroup(oldFull, text)) {
+					if (onPath) path[depth] = text;
+				}
+				else {
+					toast(Lang::get(L"clip.renameFailed"));
+				}
+			}
+		}
 		else if (kind == Input::Title) {
 			history->setPhraseTitle(id, text); //留空 = 去掉备注名
 		}
@@ -914,7 +1022,7 @@ void WinClip::onTick(UINT id)
 		if (focused) refresh();
 		return;
 	}
-	if (id != timerDock || closing) return;
+	if (id != timerDock || closing || modal) return;
 	// 正按着鼠标（多半是在拖边改大小，光标会跑到窗口外面去）：不收
 	if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) {
 		outTicks = 0;

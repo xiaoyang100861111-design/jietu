@@ -2,6 +2,7 @@
 #include <commdlg.h>
 #include <algorithm>
 #include <cmath>
+#include <cwctype>
 #include "../Lang.h"
 #include "../Setting.h"
 #include "WinSetting.h"
@@ -17,6 +18,22 @@ WinSettingCommon::WinSettingCommon(Ling::WinBase* parent):Ling::Node(parent)
     initWidthCtrls(L"rect");
     initWidthCtrls(L"ellipse");
     auto weakThis = getWeakThis();
+    // 敲色值用的键盘、鼠标订阅。同下面那个回调：先确认自己还活着再碰成员
+    hexCharToken = win->onChar.add([this, weakThis](UINT code) {
+        if (!weakThis.lock() || hexTarget.empty()) return;
+        onHexChar(code);
+    });
+    hexKeyToken = win->onKeyDown.add([this, weakThis](UINT key) {
+        if (!weakThis.lock() || hexTarget.empty()) return;
+        onHexKey(key);
+    });
+    hexMouseToken = win->onMouseDown.add([this, weakThis](POINT pos, bool isRight) {
+        if (!weakThis.lock() || hexTarget.empty()) return;
+        // 点到正在敲的那个色值按钮上由它自己的 onClick 处理，点别处就是不敲了
+        auto it = hexBtns.find(hexTarget);
+        if (it != hexBtns.end() && it->second->isPosIn(pos)) return;
+        endHexInput(false);
+    });
     // 这个回调一直挂在窗口上，而本节点可能在窗口关闭之前就被菜单切换换掉了，
     // 所以先确认自己还活着再去碰成员
     win->onDestroy.add([this, weakThis]() {
@@ -28,6 +45,9 @@ WinSettingCommon::WinSettingCommon(Ling::WinBase* parent):Ling::Node(parent)
 WinSettingCommon::~WinSettingCommon()
 {
     win->onMouseDown.remove(onMouseDownToken);
+    win->onChar.remove(hexCharToken);
+    win->onKeyDown.remove(hexKeyToken);
+    win->onMouseDown.remove(hexMouseToken);
 }
 
 void WinSettingCommon::initAutoStartCtrls()
@@ -160,26 +180,7 @@ void WinSettingCommon::initWidthCtrls(const std::wstring& tool)
         btn->setHoverBg(0XFFFFFFFF);
         return btn;
     };
-    // 颜色：一个色块，点一下换成下一种。色表与 ToolSub 里的 colors 一一对应，存的是下标
-    static const std::vector<uint32_t> colors{ 0XCF1322FF, 0XD48806FF, 0X389E0DFF, 0X13C2C2FF, 0X0958D9FF,
-        0X722ED1FF, 0XEB2F96FF, 0X000000FF, 0XFFFFFFFF };
-    auto readColor = [tool]() {
-        auto idx = static_cast<size_t>(Setting::get()->getToolNum(tool, L"colorIndex", 0.f));
-        return idx < colors.size() ? idx : size_t{ 0 };
-    };
-    auto swatch = box->makeChild<Ling::Button>();
-    swatch->setHeight(22.f);
-    swatch->setWidth(52.f);
-    swatch->setMarginRight(12.f);
-    swatch->setBorder(1.f, 0xE0E0E0FF);
-    swatch->setBg(colors[readColor()]);
-    swatch->setHoverBg(colors[readColor()]);
-    swatch->onClick.add([tool, readColor](Ling::Button* btn) {
-        const auto idx = (readColor() + 1) % colors.size();
-        Setting::get()->setToolNum(tool, L"colorIndex", static_cast<float>(idx));
-        btn->setBg(colors[idx]);
-        btn->setHoverBg(colors[idx]);
-    });
+    makeColorCtrls(box, tool);
 
     auto minus = makeBtn(L"－", 36.f);
     auto value = makeBtn(std::to_wstring(read()), 52.f);
@@ -233,7 +234,173 @@ void WinSettingCommon::initClipCtrls()
     border->setBg(0xE0E0E0FF);
 }
 
-// 主题色：一个色块按钮，点开系统的调色板随便挑
+namespace {
+    // 与 ToolSub 里的 colors 一一对应（第一格可以自定义，见下面的 getColor）
+    const std::vector<UINT> presetColors{ 0xCF1322, 0xD48806, 0x389E0D, 0x13C2C2, 0x0958D9, 0x722ED1, 0xEB2F96, 0x000000, 0xFFFFFF };
+
+    std::wstring hexStr(UINT rgb)
+    {
+        return std::format(L"#{:06X}", rgb & 0xFFFFFF);
+    }
+
+    // 从一段文字里认出色值：#RGB 或 #RRGGBB，井号可有可无，前后的空白不管。认不出返回 false
+    bool parseHex(const std::wstring& text, UINT& rgb)
+    {
+        std::wstring digits;
+        for (auto c : text) {
+            if (c == L'#' || c == L' ' || c == L'\t' || c == L'\r' || c == L'\n') continue;
+            if (!iswxdigit(c)) return false;
+            digits += c;
+        }
+        if (digits.size() == 3) digits = { digits[0], digits[0], digits[1], digits[1], digits[2], digits[2] };
+        if (digits.size() != 6) return false;
+        rgb = static_cast<UINT>(wcstoul(digits.c_str(), nullptr, 16));
+        return true;
+    }
+}
+
+UINT WinSettingCommon::getColor(const std::wstring& target)
+{
+    auto setting = Setting::get();
+    if (target == L"theme") return setting->getThemeColor();
+    // 工具的默认色：选的是色表第一格就用那一格的自定义值，否则是色表里固定的那几种
+    auto idx = static_cast<size_t>(setting->getToolNum(target, L"colorIndex", 0.f));
+    if (idx == 0 || idx >= presetColors.size()) {
+        return static_cast<UINT>(setting->getToolNum(target, L"color0", static_cast<float>(presetColors[0]))) & 0xFFFFFF;
+    }
+    return presetColors[idx];
+}
+
+// 注意：改主题色会把设置窗口关掉重开（窗口自己的高亮也用主题色），
+// 那之后本节点就没了，所以调用方调完这个函数必须立刻返回
+void WinSettingCommon::setColor(const std::wstring& target, UINT rgb)
+{
+    rgb &= 0xFFFFFF;
+    auto setting = Setting::get();
+    if (target == L"theme") {
+        setting->setThemeColor(rgb);
+        win->close();
+        Ling::App::get()->dq.TryEnqueue([]() {
+            WinSetting::init();
+        });
+        return;
+    }
+    // 自定义色放进色表第一格，并把默认选中的格子指回第一格
+    setting->setToolNum(target, L"color0", static_cast<float>(rgb));
+    setting->setToolNum(target, L"colorIndex", 0.f);
+    const uint32_t rgba = (rgb << 8) | 0xFF;
+    if (auto it = swatches.find(target); it != swatches.end()) {
+        it->second->setBg(rgba);
+        it->second->setHoverBg(rgba);
+    }
+    if (auto it = hexBtns.find(target); it != hexBtns.end()) it->second->setText(hexStr(rgb));
+}
+
+void WinSettingCommon::makeColorCtrls(Ling::Node* box, const std::wstring& target)
+{
+    const UINT rgb = getColor(target);
+    const uint32_t rgba = (rgb << 8) | 0xFF;
+    auto swatch = box->makeChild<Ling::Button>();
+    swatch->setId(target);
+    swatch->setHeight(22.f);
+    swatch->setWidth(52.f);
+    swatch->setMarginRight(8.f);
+    swatch->setBg(rgba);
+    swatch->setHoverBg(rgba);
+    swatch->setBorder(1.f, 0xE0E0E0FF);
+    swatch->onClick.add([this](Ling::Button* btn) {
+        auto target = btn->id;
+        endHexInput(false);
+        static COLORREF custom[16]{};
+        const UINT cur = getColor(target);
+        CHOOSECOLOR cc{};
+        cc.lStructSize = sizeof(cc);
+        cc.hwndOwner = win->hwnd;
+        cc.lpCustColors = custom;
+        // COLORREF 是 0x00BBGGRR，和配置里存的 0xRRGGBB 字节序相反
+        cc.rgbResult = RGB((cur >> 16) & 0xFF, (cur >> 8) & 0xFF, cur & 0xFF);
+        cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+        if (!ChooseColor(&cc)) return;
+        setColor(target, (GetRValue(cc.rgbResult) << 16) | (GetGValue(cc.rgbResult) << 8) | GetBValue(cc.rgbResult));
+    });
+    swatches[target] = swatch;
+
+    auto hex = box->makeChild<Ling::Button>();
+    hex->setId(target);
+    hex->setText(hexStr(rgb));
+    hex->setHeight(28.f);
+    hex->setWidth(96.f);
+    hex->setMarginRight(target == L"theme" ? 0.f : 12.f);
+    hex->setBg(0xFFFFFFFF);
+    hex->setHoverBg(0xFFFFFFFF);
+    hex->setBorder(1.f, 0xE0E0E0FF);
+    hex->onClick.add([this](Ling::Button* btn) {
+        // 再点一下正在敲的那个 = 不敲了
+        const bool same = hexTarget == btn->id;
+        endHexInput(false);
+        if (same) return;
+        hexTarget = btn->id;
+        hexText.clear();
+        showHexInput();
+    });
+    hexBtns[target] = hex;
+}
+
+// 把已经敲了的几位显示到按钮上，后面跟一个下划线表示还在等输入
+void WinSettingCommon::showHexInput()
+{
+    auto it = hexBtns.find(hexTarget);
+    if (it != hexBtns.end()) it->second->setText(L"#" + hexText + L"_");
+}
+
+void WinSettingCommon::endHexInput(bool commit)
+{
+    if (hexTarget.empty()) return;
+    auto target = hexTarget;
+    auto text = hexText;
+    hexTarget.clear();
+    hexText.clear();
+    UINT rgb{ 0 };
+    if (commit && parseHex(text, rgb)) {
+        setColor(target, rgb); //改主题色时窗口会重开，这之后不能再碰成员，见 setColor
+        return;
+    }
+    // 没敲完 / 取消：按钮上的字恢复成现在生效的色值
+    auto it = hexBtns.find(target);
+    if (it != hexBtns.end()) it->second->setText(hexStr(getColor(target)));
+}
+
+void WinSettingCommon::onHexChar(UINT code)
+{
+    if (!iswxdigit(static_cast<wint_t>(code)) || hexText.size() >= 6) return;
+    hexText += static_cast<wchar_t>(towupper(static_cast<wint_t>(code)));
+    // 敲满六位直接生效，不用再按回车
+    if (hexText.size() == 6) endHexInput(true);
+    else showHexInput();
+}
+
+void WinSettingCommon::onHexKey(UINT key)
+{
+    if (key == VK_ESCAPE) {
+        endHexInput(false);
+    }
+    else if (key == VK_RETURN) {
+        endHexInput(true); //三位的简写（#RGB）敲完按回车也认
+    }
+    else if (key == VK_BACK) {
+        if (!hexText.empty()) hexText.pop_back();
+        showHexInput();
+    }
+    else if (key == 'V' && (GetKeyState(VK_CONTROL) & 0x8000)) {
+        // 粘贴：剪切板里是 #RRGGBB 这样的色值就直接用
+        UINT rgb{ 0 };
+        if (!parseHex(Ling::Util::getTextFromClipboard(), rgb)) return;
+        hexText = hexStr(rgb).substr(1);
+        endHexInput(true);
+    }
+}
+
+// 主题色
 void WinSettingCommon::initThemeCtrls()
 {
     auto box = makeChild<Ling::Node>();
@@ -247,32 +414,7 @@ void WinSettingCommon::initThemeCtrls()
     label->setJustifyContent(Ling::Justify::Center);
     label->setFlexGrow(1.f);
 
-    const uint32_t rgba = (Setting::get()->getThemeColor() << 8) | 0xFF;
-    auto btn = box->makeChild<Ling::Button>();
-    btn->setHeight(22.f);
-    btn->setWidth(60.f);
-    btn->setBg(rgba);
-    btn->setHoverBg(rgba);
-    btn->setBorder(1.f, 0xE0E0E0FF);
-    btn->onClick.add([this](Ling::Button* btn) {
-        static COLORREF custom[16]{};
-        const UINT cur = Setting::get()->getThemeColor();
-        CHOOSECOLOR cc{};
-        cc.lStructSize = sizeof(cc);
-        cc.hwndOwner = win->hwnd;
-        cc.lpCustColors = custom;
-        // COLORREF 是 0x00BBGGRR，和配置里存的 0xRRGGBB 字节序相反
-        cc.rgbResult = RGB((cur >> 16) & 0xFF, (cur >> 8) & 0xFF, cur & 0xFF);
-        cc.Flags = CC_FULLOPEN | CC_RGBINIT;
-        if (!ChooseColor(&cc)) return;
-        const UINT rgb = (GetRValue(cc.rgbResult) << 16) | (GetGValue(cc.rgbResult) << 8) | GetBValue(cc.rgbResult);
-        Setting::get()->setThemeColor(rgb);
-        // 设置窗口自己的高亮也用主题色，同切语言一样：关掉重开一遍
-        win->close();
-        Ling::App::get()->dq.TryEnqueue([]() {
-            WinSetting::init();
-        });
-    });
+    makeColorCtrls(box, L"theme");
 
     auto border = makeChild<Ling::Node>();
     border->setHeight(1.f);

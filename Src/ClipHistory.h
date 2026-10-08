@@ -43,6 +43,11 @@ public:
 	bool addGroup(const std::wstring& name);
 	// 连同下面的子分组一起删。不删话术，里面的话术挪到上一级分组（没有上一级就是未分组）
 	void removeGroup(const std::wstring& name);
+	// 改名：name 是完整路径，newName 只是它自己那一级的新名字。子分组和话术跟着一起改。
+	// 新名字为空、含 /、或者同一级里已经有同名的，返回 false
+	bool renameGroup(const std::wstring& name, const std::wstring& newName);
+	// 交换两个分组的先后位置（都是完整路径，应当是同一级的兄弟）
+	void swapGroups(const std::wstring& a, const std::wstring& b);
 	// prefix 下面的直接子分组的名字（只是那一级的名字，不是完整路径）。prefix 为空取一级分组
 	std::vector<std::wstring> getChildGroups(const std::wstring& prefix) const;
 	// 所有分组的完整路径，按树的顺序（父在前，紧跟着它的子孙）

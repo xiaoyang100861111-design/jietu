@@ -566,6 +566,38 @@ void ClipHistory::removeGroup(const std::wstring& name)
 	notify();
 }
 
+bool ClipHistory::renameGroup(const std::wstring& name, const std::wstring& newName)
+{
+	if (name.empty() || newName.empty() || newName.find(L'/') != std::wstring::npos) return false;
+	const auto slash = name.find_last_of(L'/');
+	const std::wstring target = slash == std::wstring::npos ? newName : name.substr(0, slash + 1) + newName;
+	if (target == name) return true;
+	if (std::find(groups.begin(), groups.end(), target) != groups.end()) return false;
+	if (std::find(groups.begin(), groups.end(), name) == groups.end()) return false;
+	const auto prefix = name + L"/";
+	// 自己和所有子孙的路径，把开头那一段换成新的
+	auto fix = [&](std::wstring& path) {
+		if (path == name) path = target;
+		else if (path.starts_with(prefix)) path = target + L"/" + path.substr(prefix.size());
+	};
+	for (auto& path : groups) fix(path);
+	for (auto& phrase : phrases) fix(phrase->group);
+	savePhrases();
+	notify();
+	return true;
+}
+
+void ClipHistory::swapGroups(const std::wstring& a, const std::wstring& b)
+{
+	auto itA = std::find(groups.begin(), groups.end(), a);
+	auto itB = std::find(groups.begin(), groups.end(), b);
+	if (itA == groups.end() || itB == groups.end() || itA == itB) return;
+	// 子分组各有各的条目，顺序是按父分组筛出来的，所以只换这两条就够了
+	std::iter_swap(itA, itB);
+	savePhrases();
+	notify();
+}
+
 std::vector<std::wstring> ClipHistory::getChildGroups(const std::wstring& prefix) const
 {
 	std::vector<std::wstring> result;
