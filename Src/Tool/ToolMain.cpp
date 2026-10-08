@@ -94,8 +94,17 @@ void ToolMain::onCreated()
 			btn->setHeightPercent(100.f);
 			btn->setFlexGrow(1.f);
 			btn->setHoverBg(0xF2F2F2ff);
-			btn->setFontFamily(L"icon");
-			btn->setFontSize(13.f);
+			// 图标字体里没有翻译的图标，这个按钮直接用系统字体写个字
+			if (id == L"translate") {
+				btn->setFontSize(14.f);
+			}
+			else {
+				btn->setFontFamily(L"icon");
+				btn->setFontSize(13.f);
+			}
+			// 关闭（叉）标红，复制到剪切板（勾）标绿，一眼分得清
+			if (id == L"close") { btn->setColor(0xE64340FF); btn->setHoverColor(0xE64340FF); }
+			else if (id == L"clipboard") { btn->setColor(0x07C160FF); btn->setHoverColor(0x07C160FF); }
 			btn->onClick.add([this](Ling::Button* btn) {onClick(btn);});
 			tip->bind(btn, Lang::get(std::format(L"tool.{}", id)));
 			btns.push_back(btn);
@@ -151,6 +160,14 @@ void ToolMain::onClick(Ling::Button* btn)
 	}
 	else if (btn->id == L"clipboard") {
 		win->copyToClipboard();
+		return;
+	}
+	else if (btn->id == L"ocr") {
+		win->startTextWork(false);
+		return;
+	}
+	else if (btn->id == L"translate") {
+		win->startTextWork(true);
 		return;
 	}
 	// 再次点击已选中的按钮 = 取消选中（开关式）。cancelSelect 里已经做了配色复位、

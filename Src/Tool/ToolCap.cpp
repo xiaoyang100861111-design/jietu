@@ -67,6 +67,9 @@ void ToolCap::onCreated()
 			btn->setFontFamily(L"icon");
 			btn->setFontSize(13.f);
 		}
+		// 关闭（叉）标红，复制到剪切板（勾）标绿，一眼分得清
+		if (btnIds[i] == L"close") { btn->setColor(0xE64340FF); btn->setHoverColor(0xE64340FF); }
+		else if (btnIds[i] == L"clipboard") { btn->setColor(0x07C160FF); btn->setHoverColor(0x07C160FF); }
 		btn->onClick.add([this](Ling::Button* btn) { onClick(btn); });
 		if (!btnTips[i].empty()) {
 			tip->bind(btn, Lang::get(btnTips[i]));

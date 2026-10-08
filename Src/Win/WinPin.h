@@ -1,5 +1,6 @@
 #pragma once
 #include <include/Ling.h>
+#include "../Translate.h"
 
 class ToolMain;
 class ToolSub;
@@ -24,6 +25,10 @@ public:
 	void copyToClipboard();
 	// 弹另存为对话框，把合成结果存成 PNG，成功即关窗；用户取消或失败则保持窗口
 	void saveToFile();
+	// 文字识别 / 翻译（ToolMain 上的两个按钮）。活在后台干，结果回来之前按钮再点无效。
+	// 翻译成功就把底图换成盖了译文的那张，已经画上去的 shape 原样留在上面；
+	// 文字识别则弹框显示认出来的文字
+	void startTextWork(bool translate);
 	// 所有 ShapeText 共用的文本输入框，第一次用到时才建。
 	// 共用而不是一个 shape 一个：TextBox 构造时会往窗口的十来个事件上挂回调，
 	// N 个实例意味着每次鼠标移动都要跑 N 遍，而同一时刻只可能有一个 ShapeText 在编辑。
@@ -65,7 +70,9 @@ private:
 	// 只画底图和未撤销的 shape，不含蓝色边框和夹点。
 	// size 是出参，给的是底图的原始尺寸 —— 必须拿它去解释 pixels，不能用窗口的 w/h：
 	// Ctrl+滚轮缩放改的只有窗口大小，两者对不上就是按错误的宽高读缓冲区（越界崩溃、图也是花的）
-	bool getImagePixels(std::vector<BYTE>& pixels, D2D1_SIZE_U& size);
+	// withShapes 为 false 时只要底图（文字识别 / 翻译用：画上去的框和箭头不该被当成文字）
+	bool getImagePixels(std::vector<BYTE>& pixels, D2D1_SIZE_U& size, bool withShapes = true);
+	void onTextWorkDone(const Translate::Result& res, bool translate, D2D1_SIZE_U size, std::vector<BYTE>& pixels);
 	// 另存为对话框会抢走前台并把 WinPin 激活，取消保存后用它把窗口层级和前台窗口恢复原样
 	void restoreWindowState(HWND foregroundBeforeDialog);
 	// 把窗口尺寸掰成"底图像素 × scale"。系统在 DPI 变化时会按新旧缩放比擅自缩放窗口
@@ -92,6 +99,10 @@ private:
 	Microsoft::WRL::ComPtr<IDWriteTextLayout> scaleTip;
 	Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushTipBg, brushTipText;
 	bool isMouseDown{ false }, isClosed{ false };
+	// 文字识别 / 翻译正在后台跑，以及这一次任务的编号（0 = 没有）。
+	// 结果回来时按编号找窗口，窗口已经关掉就找不到，结果直接丢弃
+	bool textWorking{ false };
+	unsigned textWorkId{ 0 };
 	// onDpiChanged 与 onSizeChanged 之间的接力标记，见构造函数里的注释
 	bool dpiChanged{ false };
 	POINT pressPos{ 0,0 };

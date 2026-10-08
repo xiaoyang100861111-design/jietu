@@ -9,6 +9,7 @@
 #include "../App.h"
 #include "../Util.h"
 #include "../Update.h"
+#include "../Lang.h"
 
 using namespace Microsoft::WRL;
 namespace {
@@ -327,6 +328,7 @@ void WinPin::onDown(POINT pos, BOOL isRight)
 	// 编辑文本时，落在文本框里的点击整个交给 TextBox（它自己订阅了窗口的鼠标事件）。
 	// 这里不能抢先 SetCapture / 置 isMouseDown，否则拖选文本会被当成拖 shape。
 	if (editingText && textBox && textBox->isPosIn(pos)) return;
+	if (textWorking) return; //识别 / 翻译的结果回来之前不让动，免得底图换掉时正画到一半
 	if (isRight) {
 		// 右键在"有工具条"和"只剩图"这两个状态之间来回切。
 		// 藏着的时候（上一次右键收起来的）就把它请回来。位置先重排一遍：
@@ -546,6 +548,65 @@ void WinPin::copyToClipboard()
 	close();
 }
 
+void WinPin::startTextWork(bool translate)
+{
+	static unsigned workSeq{ 0 };
+	if (textWorking) return;
+	auto pixels = std::make_shared<std::vector<BYTE>>();
+	D2D1_SIZE_U size{};
+	if (!getImagePixels(*pixels, size, false)) return;
+	textWorking = true;
+	const auto id = textWorkId = ++workSeq;
+	SetCursor(LoadCursor(nullptr, IDC_WAIT));
+	// 回调不捕获 this：结果回来的时候这个窗口可能已经关了，按编号去 winPins 里找
+	Translate::start((int)size.width, (int)size.height, *pixels, translate,
+		[id, translate, size, pixels](std::shared_ptr<Translate::Result> res) {
+			for (auto& pin : winPins) {
+				if (pin->textWorkId != id || pin->isClosed) continue;
+				pin->onTextWorkDone(*res, translate, size, *pixels);
+				return;
+			}
+		});
+}
+
+void WinPin::onTextWorkDone(const Translate::Result& res, bool translate, D2D1_SIZE_U size, std::vector<BYTE>& pixels)
+{
+	textWorking = false;
+	textWorkId = 0;
+	SetCursor(LoadCursor(nullptr, IDC_ARROW));
+	if (res.ok && translate && Translate::render((int)size.width, (int)size.height, pixels, res.blocks)) {
+		// 与构造函数里拿外部像素建底图是同一套属性
+		D2D1_BITMAP_PROPERTIES1 props{};
+		props.pixelFormat = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
+		props.bitmapOptions = D2D1_BITMAP_OPTIONS_NONE;
+		props.dpiX = 96.0f;
+		props.dpiY = 96.0f;
+		ComPtr<ID2D1Bitmap1> img;
+		auto hr = Ling::D2D::get()->deviceContext->CreateBitmap(size, pixels.data(), size.width * 4, &props, img.GetAddressOf());
+		if (SUCCEEDED(hr)) {
+			screenImg = img;
+			refresh();
+			return;
+		}
+	}
+	// 剩下的都要弹框。弹框开着的时候用户仍然可以把本窗口关掉，
+	// 所以从这里往下不再碰 this，要用的东西先取到局部变量里
+	auto title = Lang::get(L"about.sysTip");
+	const UINT flags = MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND;
+	if (!res.ok || translate) {
+		auto msg = res.ok ? Lang::get(L"translate.failed") : res.err;
+		MessageBox(nullptr, msg.data(), title.data(), MB_OK | flags);
+		return;
+	}
+	// 文字太多时弹框会高出屏幕，只预览开头一段，写进剪切板的是全文
+	auto text = res.text;
+	auto preview = text.size() > 1200 ? text.substr(0, 1200) + L"…" : text;
+	auto tip = preview + L"\n\n" + Lang::get(L"cap.ocrCopy");
+	if (MessageBox(nullptr, tip.data(), title.data(), MB_OKCANCEL | flags) == IDOK) {
+		Ling::Util::setTextToClipboard(text);
+	}
+}
+
 void WinPin::saveToFile()
 {
 	auto foregroundBeforeDialog = GetForegroundWindow();
@@ -588,7 +649,7 @@ void WinPin::restoreWindowState(HWND foregroundBeforeDialog)
 // 不直接画到 screenImg 上：它是 ShapeEraser 的"原样"来源，也是 ShapeMosaic 的取样来源，
 // 一旦被 shape 覆写，之后再擦除/打码就会拿到已经画过的画面。
 // 用 d2d->deviceContext 做离屏是安全的，SetTarget → BeginDraw → EndDraw → SetTarget(nullptr) 在本函数内闭环。
-bool WinPin::getImagePixels(std::vector<BYTE>& pixels, D2D1_SIZE_U& size)
+bool WinPin::getImagePixels(std::vector<BYTE>& pixels, D2D1_SIZE_U& size, bool withShapes)
 {
 	// 尺寸一律取底图的像素尺寸，不用窗口的 w/h —— Ctrl+滚轮缩放改的是窗口，
 	// 导出的图该始终是原始大小。调用方也得按这个尺寸解释 pixels，所以用出参交出去
@@ -617,7 +678,7 @@ bool WinPin::getImagePixels(std::vector<BYTE>& pixels, D2D1_SIZE_U& size)
 	ctx->DrawBitmap(screenImg.Get(), D2D1::RectF(0.f, 0.f, (float)imgSize.width, (float)imgSize.height));
 	for (auto& shape : history->shapes)
 	{
-		if (!shape->isUndo) {
+		if (withShapes && !shape->isUndo) {
 			shape->paint(ctx);
 		}
 	}
@@ -655,6 +716,10 @@ bool WinPin::getImagePixels(std::vector<BYTE>& pixels, D2D1_SIZE_U& size)
 
 BOOL WinPin::setCursor()
 {
+	if (textWorking) {
+		SetCursor(LoadCursor(nullptr, IDC_WAIT));
+		return TRUE;
+	}
 	// 编辑文本时光标形状交给 TextBox 决定（文本区 I 形、滚动条箭头）。
 	// 本函数覆写了基类且不调用它，TextBox 挂在 onCursor 上的那个订阅不会自己被触发，得手动发一次。
 	if (editingText) {

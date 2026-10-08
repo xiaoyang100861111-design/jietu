@@ -445,8 +445,10 @@ void WinCap::onUp(POINT pos, bool isRight)
         // 命令行指定了直奔某个阶段：它比下面 Ctrl 那条钉图的快捷路径更优先 ——
         // 参数是用户明确要求的，Ctrl 只是顺手按上的
         if (enterByArg()) return;
-        // 按住 Ctrl 框选：跳过调整和工具条，直接钉到桌面上
-        if (GetKeyState(VK_CONTROL) & 0x8000) {
+        // 默认框完直接进图像标记（画框、箭头、马赛克、翻译都在那边的工具条上）。
+        // 按住 Ctrl 框选才留在这里出 ToolCap：长截图、录屏、二维码识别要在截图窗口里做，
+        // 选区也只有在这里才能再调整
+        if (!(GetKeyState(VK_CONTROL) & 0x8000)) {
             startPin();
             return;
         }
