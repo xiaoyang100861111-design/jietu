@@ -12,7 +12,7 @@ using Microsoft::WRL::ComPtr;
 
 namespace {
 	std::unique_ptr<WinClip> winClip;
-	constexpr UINT timerDock{ 1 }, timerToast{ 2 }, timerCaret{ 3 };
+	constexpr UINT timerDock{ 1 }, timerToast{ 2 };
 	const wchar_t* clipTabKeys[5]{ L"clip.all", L"clip.text", L"clip.image", L"clip.files", L"clip.pinned" };
 
 	// —— 贴边监视：隔一小会儿看一眼光标是不是顶在设定的那条屏幕边上 ——
@@ -152,22 +152,16 @@ WinClip::WinClip(HWND prevHwnd, int mode, int edge) : Ling::WinBase(), prevHwnd{
 	onMouseUp.add([this](POINT pos, bool isRight) { onUp(pos, isRight); });
 	onMouseWheel.add([this](POINT pos, float space) { onWheel(space); });
 	onKeyDown.add([this](UINT key) { onKey(key); });
-	onChar.add([this](UINT code) { onCharInput(code); });
 	onTimer.add([this](UINT id) { onTick(id); });
-	onFocus.add([this]() {
-		focused = true;
-		caretOn = true;
-		refresh();
-	});
 	// 点到别处去了：面板就是个临时弹层，直接收掉
 	onBlur.add([this]() {
-		focused = false;
 		if (!modal) requestClose(); //菜单、确认框开着时也会失焦，那不算
 	});
 	// 拖边改了大小：列表能显示的行数变了，滚动位置要重新夹一下
 	onSizeChanged.add([this]() {
 		if (!created) return;
 		resized = true;
+		if (textBox) textBox->setWidth(w / dpi - 28.f);
 		clampScroll();
 		refresh();
 	});
@@ -242,6 +236,20 @@ void WinClip::onCreated()
 	canvas->enableSwapChain();
 	canvas->setSizePercent(100.f, 100.f);
 	Ling::D2D::get()->deviceContext->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black), brush.GetAddressOf());
+	// 文本框建在画布之后：Composition 的子 visual 按插入顺序叠放，它要盖在画布上面。
+	// 绝对定位摆进画布上画的那个圆角框里；宽度跟着窗口走（见 onSizeChanged）
+	textBox = body->makeChild<Ling::TextBox>();
+	textBox->setPositionType(Ling::Position::Absolute);
+	textBox->setPosition(Ling::Edge::Left, 14.f);
+	textBox->setPosition(Ling::Edge::Top, 46.f);
+	textBox->setWidth(w / dpi - 28.f);
+	textBox->setHeight(28.f);
+	textBox->setPadding(6.f, 2.f, 6.f, 2.f);
+	textBox->setBg(0xFFFFFFFF);
+	textBox->setFontSize(13.f);
+	textBox->setVerticalCenter(true);
+	textBox->onTextChanged.add([this](Ling::TextBox*, const std::wstring& text) { onTextEdit(text); });
+	updatePlaceholder();
 	rebuild();
 	// 面板开着的时候又复制了东西、或者在面板里增删了一条，列表要跟着变
 	ClipHistory::get()->onChanged = []() {
@@ -250,7 +258,6 @@ void WinClip::onCreated()
 		winClip->refresh();
 	};
 	created = true;
-	setTimer(530, timerCaret);
 	if (dockEdge != 0) {
 		// 贴边滑出来的不抢焦点：用户多半正在聊天窗口里打字，面板只是凑过来给他点一下。
 		// 既然不拿焦点，也就等不到失焦，改由定时器看光标移开没有
@@ -262,7 +269,45 @@ void WinClip::onCreated()
 		// 要能收键盘输入（搜索、上下键），得把自己弄到前台
 		SetForegroundWindow(hwnd);
 		SetFocus(hwnd);
+		textBox->focus(); //打开就能直接打字搜索
 	}
+}
+
+void WinClip::setBoxText(const std::wstring& text)
+{
+	if (!textBox) return;
+	syncing = true;
+	textBox->setText(text);
+	syncing = false;
+}
+
+void WinClip::updatePlaceholder()
+{
+	if (!textBox) return;
+	auto hint = input == Input::Group || input == Input::Rename ? L"clip.inputGroup"
+		: input == Input::Title ? L"clip.inputTitle" : L"clip.search";
+	textBox->setPlaceholder(Lang::get(hint));
+}
+
+void WinClip::onTextEdit(const std::wstring& text)
+{
+	if (syncing || closing) return;
+	// 文本框是多行的，回车会插进一个换行。这里只要单行：换行一律去掉（回车的动作在 onKey 里处理）
+	std::wstring clean;
+	for (auto c : text) {
+		if (c != L'\r' && c != L'\n') clean += c;
+	}
+	if (clean != text) setBoxText(clean);
+	if (input != Input::Search) {
+		inputText = clean;
+		return;
+	}
+	if (clean == query) return;
+	query = clean;
+	scrollY = 0.f;
+	selRow = 0;
+	rebuild();
+	refresh();
 }
 
 void WinClip::onMinMaxInfo(MINMAXINFO* mmi)
@@ -335,6 +380,8 @@ void WinClip::setMode(int val)
 	query.clear();
 	input = Input::Search;
 	inputText.clear();
+	setBoxText(L"");
+	updatePlaceholder();
 	rebuild();
 	refresh();
 }
@@ -498,35 +545,14 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 		drawText(ctx, Lang::get(i == 0 ? L"clip.modePhrase" : L"clip.modeClip"), 14.f, rect,
 			cur ? 0xFFFFFF : isHover ? 0x222222 : 0x666666, true, true);
 	}
-	// 第二排：搜索框。没有真的输入框控件：按键直接进字符串，这里把它画出来，末尾补一条竖线当光标。
-	// 新建分组 / 改备注名时也借它来输入
+	// 第二排：搜索框。新建分组 / 改备注名 / 重命名时也借它来输入
+	// 里面的字、光标都是文本框控件自己画的，这里只画外面那个圆角框，有焦点时边框亮起来
 	auto searchRect = D2D1::RectF(pad, 44.f * dpi, w - pad, 76.f * dpi);
-	auto& typed = input == Input::Search ? query : inputText;
-	// 有焦点（能打字）或者里面有字时边框亮起来
-	const bool active = focused || input != Input::Search || !typed.empty();
+	const bool active = (textBox && textBox->isFocused()) || input != Input::Search || !query.empty();
 	brush->SetColor(D2D1::ColorF(0xFFFFFF));
 	ctx->FillRoundedRectangle(D2D1::RoundedRect(searchRect, 6.f * dpi, 6.f * dpi), brush.Get());
 	brush->SetColor(D2D1::ColorF(active ? theme : 0xDDDDDD));
 	ctx->DrawRoundedRectangle(D2D1::RoundedRect(searchRect, 6.f * dpi, 6.f * dpi), brush.Get(), dpi);
-	auto searchText = D2D1::RectF(searchRect.left + 10.f * dpi, searchRect.top, searchRect.right - 10.f * dpi, searchRect.bottom);
-	float caretX = searchText.left;
-	if (typed.empty()) {
-		auto hint = input == Input::Group || input == Input::Rename ? L"clip.inputGroup"
-			: input == Input::Title ? L"clip.inputTitle" : L"clip.search";
-		// 提示文字往右让一点，给光标留个位置
-		auto hintRect = searchText;
-		hintRect.left += 4.f * dpi;
-		drawText(ctx, Lang::get(hint), 13.f, hintRect, 0xAAAAAA, false, true);
-	}
-	else {
-		drawText(ctx, typed, 13.f, searchText, 0x333333, false, true);
-		caretX = (std::min)(searchText.left + textWidth(typed, 13.f) + dpi, searchText.right);
-	}
-	// 光标：跟在已输入的字后面，一亮一灭
-	if (focused && caretOn) {
-		brush->SetColor(D2D1::ColorF(0x333333));
-		ctx->FillRectangle(D2D1::RectF(caretX, searchRect.top + 8.f * dpi, caretX + (std::max)(1.f, dpi), searchRect.bottom - 8.f * dpi), brush.Get());
-	}
 
 	// 分类 / 分组标签，一排或几排
 	const float tabTop = 82.f * dpi, tabH = 28.f * dpi;
@@ -938,9 +964,13 @@ void WinClip::beginInput(Input kind, long long id, const std::wstring& init)
 	input = kind;
 	inputId = id;
 	inputText = init;
+	setBoxText(init);
+	updatePlaceholder();
 	// 贴边滑出来的面板本来没拿焦点，要打字就得拿过来
 	SetForegroundWindow(hwnd);
 	SetFocus(hwnd);
+	textBox->focus();
+	textBox->selectAll(); //重命名 / 改备注名时原来的字全选上，直接打字就是替换
 	refresh();
 }
 
@@ -952,6 +982,10 @@ void WinClip::endInput(bool commit)
 	input = Input::Search;
 	inputText.clear();
 	inputId = 0;
+	// 文本框还给搜索用，搜索词从头来
+	query.clear();
+	setBoxText(L"");
+	updatePlaceholder();
 	auto history = ClipHistory::get();
 	if (commit && history) {
 		// 掐掉两头的空白
@@ -1015,13 +1049,6 @@ void WinClip::onTick(UINT id)
 		refresh();
 		return;
 	}
-	if (id == timerCaret) {
-		// 焦点状态顺便对一下表：有些拿到焦点的路径不发 WM_SETFOCUS 给我们
-		focused = GetFocus() == hwnd;
-		caretOn = !caretOn;
-		if (focused) refresh();
-		return;
-	}
 	if (id != timerDock || closing || modal) return;
 	// 正按着鼠标（多半是在拖边改大小，光标会跑到窗口外面去）：不收
 	if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) {
@@ -1051,12 +1078,11 @@ void WinClip::onKey(UINT key)
 		// 正在输入分组名 / 备注名：回车确认，Esc 取消
 		if (key == VK_RETURN) endInput(true);
 		else if (key == VK_ESCAPE) endInput(false);
-		else if (key == VK_BACK && !inputText.empty()) {
-			inputText.pop_back();
-			refresh();
-		}
 		return;
 	}
+	// 焦点不在文本框上（比如刚点过列表）时按了键：把焦点还给它，这样随时直接打字都是搜索。
+	// 本函数比文本框自己的按键处理先跑，所以这一下按键它也收得到
+	if (key != VK_ESCAPE && key != VK_RETURN && textBox && !textBox->isFocused()) textBox->focus();
 	if (key == VK_ESCAPE) {
 		requestClose();
 	}
@@ -1070,6 +1096,8 @@ void WinClip::onKey(UINT key)
 		activate(selRow, true);
 	}
 	else if (key == VK_DELETE) {
+		// 搜索框里有字时 Delete 是在删字，不是删选中的那一行
+		if (!query.empty()) return;
 		if (selRow < 0 || selRow >= (int)rows.size()) return;
 		auto history = ClipHistory::get();
 		if (!history) return;
@@ -1077,32 +1105,6 @@ void WinClip::onKey(UINT key)
 		if (mode == Phrase) history->removePhrase(id);
 		else history->remove(id);
 	}
-	else if (key == VK_BACK) {
-		if (query.empty()) return;
-		query.pop_back();
-		scrollY = 0.f;
-		selRow = 0;
-		rebuild();
-		refresh();
-	}
-}
-
-void WinClip::onCharInput(UINT code)
-{
-	// 控制字符（退格、回车、Esc 这些）在 onKey 里处理过了，这里只收能显示的字
-	if (closing || code < 32 || code == 127) return;
-	caretOn = true;
-	if (input != Input::Search) {
-		if (inputText.size() < 30) inputText += static_cast<wchar_t>(code);
-		refresh();
-		return;
-	}
-	if (query.size() >= 60) return;
-	query += static_cast<wchar_t>(code);
-	scrollY = 0.f;
-	selRow = 0;
-	rebuild();
-	refresh();
 }
 
 void WinClip::activate(int index, bool paste)

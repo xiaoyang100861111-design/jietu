@@ -232,6 +232,7 @@
     <ClCompile Include="Win\WinPin.cpp" />
     <ClCompile Include="Win\WinCap.cpp" />
     <ClCompile Include="Win\WinSettingAbout.cpp" />
+    <ClCompile Include="Win\WinSettingData.cpp" />
     <ClCompile Include="Win\WinSettingCommon.cpp" />
     <ClCompile Include="Win\WinSetting.cpp" />
     <ClCompile Include="Win\WinSettingShortcut.cpp" />
@@ -279,6 +280,7 @@
     <ClInclude Include="Win\WinPin.h" />
     <ClInclude Include="Win\WinCap.h" />
     <ClInclude Include="Win\WinSettingAbout.h" />
+    <ClInclude Include="Win\WinSettingData.h" />
     <ClInclude Include="Win\WinSettingCommon.h" />
     <ClInclude Include="Win\WinSetting.h" />
     <ClInclude Include="Win\WinSettingShortcut.h" />

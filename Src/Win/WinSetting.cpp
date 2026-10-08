@@ -7,6 +7,7 @@
 #include "WinSettingCommon.h"
 #include "WinSettingShortcut.h"
 #include "WinSettingAbout.h"
+#include "WinSettingData.h"
 
 std::unique_ptr<WinSetting> winSetting;
 
@@ -111,7 +112,6 @@ void WinSetting::initMenuItems(Ling::Node* menuBox)
 				menuItem->setText(Lang::get(L"setting.about"));
 			}
 			else {
-				// 不是一页设置：点了直接用资源管理器打开配置目录，方便整个拷到别的电脑上
 				menuItem->setText(Lang::get(L"setting.dataDir"));
 			}
 		}
@@ -122,10 +122,6 @@ void WinSetting::initMenuItems(Ling::Node* menuBox)
 void WinSetting::onMenuItemClick(Ling::Button* menuItem)
 {
 	auto index = Ling::Util::getIndex(menus, menuItem);
-	if (index == 3) {
-		ShellExecute(hwnd, L"open", Setting::get()->getDataPath().wstring().data(), nullptr, nullptr, SW_SHOWNORMAL);
-		return;
-	}
 	if (index < 0 || index == menuIndex) return;
 	// 通用设置里的语言下拉框是挂在 body 上的（要能盖住下面的控件），content 被换掉
 	// 它不会跟着消失，所以切菜单之前先收掉
@@ -152,6 +148,9 @@ void WinSetting::onMenuItemClick(Ling::Button* menuItem)
 	}
 	else if (menuIndex == 2) {
 		content = body->makeChild<WinSettingAbout>();
+	}
+	else {
+		content = body->makeChild<WinSettingData>();
 	}
 	content->setFlexGrow(1.0);
 	content->setHeightPercent(100.f);

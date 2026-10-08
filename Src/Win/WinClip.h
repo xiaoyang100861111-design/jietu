@@ -64,7 +64,11 @@ private:
 	bool confirmTwice(const std::wstring& first, const std::wstring& second);
 	void onWheel(float space);
 	void onKey(UINT key);
-	void onCharInput(UINT code);
+	// 文本框里的字变了
+	void onTextEdit(const std::wstring& text);
+	// 改文本框的内容但不当成用户输入处理
+	void setBoxText(const std::wstring& text);
+	void updatePlaceholder();
 	void onTick(UINT id);
 	void scrollIntoView(int index);
 	void clampScroll();
@@ -117,8 +121,10 @@ private:
 	POINT pressPos{ 0, 0 };
 	std::wstring toastText;
 	bool closing{ false };
-	// 输入框的光标：窗口有键盘焦点时才画，靠定时器一亮一灭
-	bool focused{ false }, caretOn{ true };
+	// 搜索 / 输入用的文本框，是个真正的输入控件（输入法、光标、选中、粘贴都归它管）
+	Ling::TextBox* textBox{ nullptr };
+	// 正在用代码改文本框的内容，这期间的 onTextChanged 不算用户输入
+	bool syncing{ false };
 	// 用户拖过窗口边改了大小（建窗口时那一下 WM_SIZE 不算）
 	bool created{ false }, resized{ false };
 	// 贴边滑出的：0 不是。鼠标移开就收，靠定时器看光标位置
