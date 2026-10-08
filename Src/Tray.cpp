@@ -28,12 +28,9 @@ Tray::Tray()
 	auto lingApp = Ling::App::get();
 	lingApp->initTray(100, L"UU截图");
 	Setting::get()->initShortcutKeys();
-	// 左键单击 / 双击 都进入截图
+	// 左键点托盘图标什么都不做（截图只走快捷键 / 右键菜单），右键出菜单
 	lingApp->onTrayMouseEvent.add([this](bool isDown, bool isRight) {
-		if (isDown && !isRight) {
-			WinCap::init();
-		}
-		else if (isDown && isRight) {
+		if (isDown && isRight) {
 			this->onTrayRightClick();
 		}
 	});
