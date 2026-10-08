@@ -90,15 +90,16 @@ jobs:
           Stop-Process -Id $p.Id -Force
           Write-Host 'started and stayed alive'
 
-      # 发布出去的文件叫 UU截图.exe（编译产物本身仍是 ScreenCapture.exe）
+      # 发布出去的文件叫 UUjietu.exe（编译产物本身仍是 ScreenCapture.exe）。
+      # 不能用中文名：GitHub 会把发布附件名里的非 ASCII 字符去掉，"UU截图.exe" 传上去就成了 "UU.exe"
       - name: Rename
         shell: pwsh
-        run: Copy-Item "x64\Release\ScreenCapture.exe" "x64\Release\UU截图.exe"
+        run: Copy-Item "x64\Release\ScreenCapture.exe" "x64\Release\UUjietu.exe"
 
       - uses: actions/upload-artifact@v4
         with:
           name: UUjietu
-          path: x64/Release/UU截图.exe
+          path: x64/Release/UUjietu.exe
 
       - name: Release
         uses: softprops/action-gh-release@v2
@@ -106,4 +107,4 @@ jobs:
           tag_name: build-${{ github.run_number }}
           name: UU截图 build ${{ github.run_number }}
           body: UU截图：截图标注、截图翻译、剪切板历史。下载 exe 直接运行即可。
-          files: x64/Release/UU截图.exe
+          files: x64/Release/UUjietu.exe
