@@ -5,10 +5,66 @@
 #include "Lang.h"
 #include "Win/WinCap.h"
 #include "App.h"
+#include "Win/WinSetting.h"
 
 namespace {
     std::unique_ptr<Setting> setting;
     constexpr int capShortcutMsgId{ 100 };
+    constexpr int translateShortcutMsgId{ 101 };
+
+    int shortcutMsgId(const std::wstring& type)
+    {
+        return type == L"translate" ? translateShortcutMsgId : capShortcutMsgId;
+    }
+
+    // 低级鼠标钩子：把选定的那个鼠标键变成截图键。钩子回调必须马上返回，
+    // 所以真正开截图窗口的活排进消息队列里去做
+    HHOOK mouseHook{ nullptr };
+    int mouseTrigger{ 0 };
+    bool swallowUp{ false };
+
+    LRESULT CALLBACK mouseProc(int code, WPARAM wParam, LPARAM lParam)
+    {
+        if (code == HC_ACTION && mouseTrigger != 0) {
+            bool down{ false }, up{ false };
+            if (mouseTrigger == 1) {
+                down = wParam == WM_MBUTTONDOWN;
+                up = wParam == WM_MBUTTONUP;
+            }
+            else if (wParam == WM_XBUTTONDOWN || wParam == WM_XBUTTONUP) {
+                auto info = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
+                if (HIWORD(info->mouseData) == (mouseTrigger == 2 ? XBUTTON1 : XBUTTON2)) {
+                    down = wParam == WM_XBUTTONDOWN;
+                    up = !down;
+                }
+            }
+            // 把这一下吞掉（返回非零），底下的程序收不到，弹着的菜单也就不会被这次点击关掉。
+            // 已经在截图了就放行，免得截图过程中这个键失灵
+            if (down && !WinCap::get()) {
+                swallowUp = true;
+                Ling::App::get()->dq.TryEnqueue([]() { WinCap::init(); });
+                return 1;
+            }
+            if (up && swallowUp) {
+                swallowUp = false;
+                return 1;
+            }
+        }
+        return CallNextHookEx(nullptr, code, wParam, lParam);
+    }
+
+    // 只有真的选了某个鼠标键才装钩子，关闭时拆掉，不白白拦着全系统的鼠标消息
+    void applyMouseTrigger(int val)
+    {
+        mouseTrigger = val;
+        if (val != 0 && !mouseHook) {
+            mouseHook = SetWindowsHookEx(WH_MOUSE_LL, mouseProc, GetModuleHandle(nullptr), 0);
+        }
+        else if (val == 0 && mouseHook) {
+            UnhookWindowsHookEx(mouseHook);
+            mouseHook = nullptr;
+        }
+    }
     // 配置文件的默认内容。空文件、坏 JSON、缺键都拿它兜底，所以这里列出的每一项
     // 都是代码里会直接按名字取的（见 getLang / getAutoStart / initShortcutKeys）
     constexpr std::wstring_view defaultConfig{ LR"""({"common":{"autoStart":false,"language":"zh-CN"},"shortcutKey":{"cap":"Ctrl+Alt+A"}})""" };
@@ -75,11 +131,15 @@ void Setting::setShortcutKey(const std::wstring& type, const std::vector<std::ws
         str += L"+" + keys[i];
     }
     str.erase(0,1);
-    auto shortcutKey = configObj.GetNamedObject(L"shortcutKey");
+    auto shortcutKey = configObj.GetNamedObject(L"shortcutKey", nullptr);
+    if (!shortcutKey) {
+        shortcutKey = JsonObject();
+        configObj.SetNamedValue(L"shortcutKey", shortcutKey);
+    }
     shortcutKey.SetNamedValue(type, JsonValue::CreateStringValue(str));
     auto app = Ling::App::get();
-    app->unRegHotKey(capShortcutMsgId);
-    app->regHotKey(str, capShortcutMsgId);
+    app->unRegHotKey(shortcutMsgId(type));
+    app->regHotKey(str, shortcutMsgId(type));
     save();
 }
 
@@ -87,9 +147,50 @@ std::wstring Setting::getShortcutKey(const std::wstring& type)
 {
     // 一路用带默认值的重载：启动时 ensureDefaults 已经补齐过，这里只是别让运行期
     // 意外（配置被外部改动、问了个没配过的 type）变成一次崩溃
+    // 没配过的给默认组合（老配置文件里没有 translate 这一项）
+    std::wstring def = type == L"cap" ? L"Ctrl+Alt+A" : type == L"translate" ? L"Ctrl+Alt+T" : L"";
     auto obj = configObj.GetNamedObject(L"shortcutKey", nullptr);
-    if (!obj) return L"";
-    return std::wstring{ obj.GetNamedString(type, L"") };
+    if (!obj) return def;
+    std::wstring val{ obj.GetNamedString(type, L"") };
+    return val.empty() ? def : val;
+}
+
+UINT Setting::getThemeColor()
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) return 0x1677ff;
+    return static_cast<UINT>(common.GetNamedNumber(L"themeColor", 0x1677ff)) & 0xFFFFFF;
+}
+
+void Setting::setThemeColor(UINT rgb)
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) {
+        common = JsonObject();
+        configObj.SetNamedValue(L"common", common);
+    }
+    common.SetNamedValue(L"themeColor", JsonValue::CreateNumberValue(static_cast<double>(rgb & 0xFFFFFF)));
+    save();
+}
+
+int Setting::getMouseTrigger()
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) return 0;
+    auto val = static_cast<int>(common.GetNamedNumber(L"mouseTrigger", 0));
+    return val >= 0 && val <= 3 ? val : 0;
+}
+
+void Setting::setMouseTrigger(int val)
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) {
+        common = JsonObject();
+        configObj.SetNamedValue(L"common", common);
+    }
+    common.SetNamedValue(L"mouseTrigger", JsonValue::CreateNumberValue(val));
+    save();
+    applyMouseTrigger(val);
 }
 
 void Setting::setAutoStart(bool autoStart)
@@ -251,16 +352,21 @@ void Setting::initShortcutKeys()
 {
     auto lingApp = Ling::App::get();
     // 取不到就用默认的那个组合：热键注册不上顶多是快捷键不好用，不该让程序起不来
-    std::wstring capStr{ getShortcutKey(L"cap") };
-    if (capStr.empty()) capStr = L"Ctrl+Alt+A";
-    lingApp->regHotKey(capStr, capShortcutMsgId);
+    lingApp->regHotKey(getShortcutKey(L"cap"), capShortcutMsgId);
+    lingApp->regHotKey(getShortcutKey(L"translate"), translateShortcutMsgId);
+    applyMouseTrigger(getMouseTrigger());
 
     lingApp->onHotKey.add([this](UINT msg) {
         if (msg == capShortcutMsgId) {
             WinCap::init();
         }
+        else if (msg == translateShortcutMsgId) {
+            WinCap::init(true); //框完选区直接翻译
+        }
     });
+    // 已经在运行时又双击了一次 exe：不截图（截图只走快捷键 / 托盘），
+    // 把设置窗口打开，让用户知道程序在托盘里待着
     lingApp->onSecondInstance.add([this]() {
-        WinCap::init();
+        WinSetting::init();
     });
 }

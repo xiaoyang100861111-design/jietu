@@ -16,6 +16,13 @@ public:
 	const JsonObject getConfigObj();
 	void setShortcutKey(const std::wstring& type, const std::vector<std::wstring>& keys);
 	std::wstring getShortcutKey(const std::wstring& type);
+	// 主题色（选区边框、贴图窗口边框、设置窗口的高亮），0xRRGGBB
+	UINT getThemeColor();
+	void setThemeColor(UINT rgb);
+	// 不按键盘、用鼠标键触发截图：0 关闭，1 中键，2 侧键（后退），3 侧键（前进）。
+	// 按键盘上的 Alt 会把已经弹出来的右键菜单关掉，想截菜单时用它
+	int getMouseTrigger();
+	void setMouseTrigger(int val);
 	void setAutoStart(bool autoStart);
 	bool getAutoStart();
 	std::wstring getLang();

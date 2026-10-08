@@ -25,12 +25,12 @@ BEGIN
         BLOCK "080404b0"
         BEGIN
             VALUE "CompanyName", "LiuXiaoLun"
-            VALUE "FileDescription", "ScreenCapture"
+            VALUE "FileDescription", "UUJietu"
             VALUE "FileVersion", "2.5.15.0"
             VALUE "InternalName", "ScreenCapture.exe"
             VALUE "LegalCopyright", "Copyright (C) LiuXiaoLun 2023-2026"
             VALUE "OriginalFilename", "ScreenCapture.exe"
-            VALUE "ProductName", "ScreenCapture"
+            VALUE "ProductName", "UUJietu"
             VALUE "ProductVersion", "2.5.15.0"
         END
     END

@@ -115,6 +115,12 @@ App::App()
 			Update::checkLater();
 			return;
 		}
-		WinCap::init();//默认情况下，应用启动随即进入截图模式
+		// 启动只挂托盘，不自动截图：截图走快捷键 / 托盘图标。
+		// 命令行明确给了 --enter=xxx 的除外，那是用户点名要直接进某个功能
+		// （上面用 operator[] 查过 --enter，没给这个参数时表里也会多出一个空值，所以要看值）
+		auto enter = app->args.find(L"--enter");
+		if (enter != app->args.end() && !enter->second.empty()) {
+			WinCap::init();
+		}
     }
 }

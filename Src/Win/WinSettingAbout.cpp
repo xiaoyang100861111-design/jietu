@@ -6,7 +6,7 @@
 
 WinSettingAbout::WinSettingAbout(Ling::WinBase* parent):Ling::Node(parent)
 {
-    std::vector<std::wstring> keys = { L"version",L"project",L"author" };
+    std::vector<std::wstring> keys = { L"version",L"project" };
     for (auto& key : keys)
     {
         auto box = makeChild<Ling::Node>();
@@ -28,22 +28,7 @@ WinSettingAbout::WinSettingAbout(Ling::WinBase* parent):Ling::Node(parent)
             btn->setText(verStr);
         }
         else if (key == L"project") {
-            btn->setText(L"github.com/xland/ScreenCapture");
-            btn->setColor(0x597ef7ff);
-            btn->setHoverColor(0x597ef7ff);
-            btn->onClick.add([this](Ling::Button* btn) {
-                std::wstring downloadUrl{ L"https://github.com/xland/ScreenCapture" };
-                ShellExecute(win->hwnd, L"open", downloadUrl.data(), nullptr, nullptr, SW_SHOWNORMAL);
-                });
-        }
-        else {
-            btn->setText(Lang::get(L"about.wechat"));
-            btn->setColor(0x597ef7ff);
-            btn->setHoverColor(0x597ef7ff);
-            btn->onClick.add([this](Ling::Button* btn) {
-                Ling::Util::setTextToClipboard(L"liulun_007");
-                MessageBox(win->hwnd, Lang::get(L"about.copySuccess").data(), Lang::get(L"about.sysTip").data(), MB_OK | MB_ICONINFORMATION);
-                });
+            btn->setText(L"UU截图");
         }
         btn->setAlignItems(Ling::Align::FlexEnd);
         btn->setHeight(28.f);

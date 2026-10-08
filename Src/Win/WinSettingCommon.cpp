@@ -1,4 +1,5 @@
 ﻿#include "pch.h"
+#include <commdlg.h>
 #include "../Lang.h"
 #include "../Setting.h"
 #include "WinSetting.h"
@@ -8,6 +9,7 @@ WinSettingCommon::WinSettingCommon(Ling::WinBase* parent):Ling::Node(parent)
 {    
     initAutoStartCtrls();
     initLangCtrls();
+    initThemeCtrls();
     auto weakThis = getWeakThis();
     // 这个回调一直挂在窗口上，而本节点可能在窗口关闭之前就被菜单切换换掉了，
     // 所以先确认自己还活着再去碰成员
@@ -88,6 +90,52 @@ void WinSettingCommon::initLangCtrls()
         if (selectBox) return;
         this->showSelectBox(btn);
         });
+    auto border = makeChild<Ling::Node>();
+    border->setHeight(1.f);
+    border->setBg(0xE0E0E0FF);
+}
+
+// 主题色：一个色块按钮，点开系统的调色板随便挑
+void WinSettingCommon::initThemeCtrls()
+{
+    auto box = makeChild<Ling::Node>();
+    box->setHeight(39.f);
+    box->setFlexDirection(Ling::FlexDirection::Row);
+    box->setAlignItems(Ling::Align::Center);
+
+    auto label = box->makeChild<Ling::Label>();
+    label->setText(Lang::get(L"setting.themeColor"));
+    label->setHeightPercent(100.f);
+    label->setJustifyContent(Ling::Justify::Center);
+    label->setFlexGrow(1.f);
+
+    const uint32_t rgba = (Setting::get()->getThemeColor() << 8) | 0xFF;
+    auto btn = box->makeChild<Ling::Button>();
+    btn->setHeight(22.f);
+    btn->setWidth(60.f);
+    btn->setBg(rgba);
+    btn->setHoverBg(rgba);
+    btn->setBorder(1.f, 0xE0E0E0FF);
+    btn->onClick.add([this](Ling::Button* btn) {
+        static COLORREF custom[16]{};
+        const UINT cur = Setting::get()->getThemeColor();
+        CHOOSECOLOR cc{};
+        cc.lStructSize = sizeof(cc);
+        cc.hwndOwner = win->hwnd;
+        cc.lpCustColors = custom;
+        // COLORREF 是 0x00BBGGRR，和配置里存的 0xRRGGBB 字节序相反
+        cc.rgbResult = RGB((cur >> 16) & 0xFF, (cur >> 8) & 0xFF, cur & 0xFF);
+        cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+        if (!ChooseColor(&cc)) return;
+        const UINT rgb = (GetRValue(cc.rgbResult) << 16) | (GetGValue(cc.rgbResult) << 8) | GetBValue(cc.rgbResult);
+        Setting::get()->setThemeColor(rgb);
+        // 设置窗口自己的高亮也用主题色，同切语言一样：关掉重开一遍
+        win->close();
+        Ling::App::get()->dq.TryEnqueue([]() {
+            WinSetting::init();
+        });
+    });
+
     auto border = makeChild<Ling::Node>();
     border->setHeight(1.f);
     border->setBg(0xE0E0E0FF);

@@ -9,6 +9,7 @@
 #include "../App.h"
 #include "../Util.h"
 #include "../Update.h"
+#include "../Setting.h"
 #include "../Lang.h"
 
 using namespace Microsoft::WRL;
@@ -272,7 +273,7 @@ void WinPin::onCreated()
     canvas = body->makeChild<Ling::Canvas>();
     canvas->enableSwapChain();
     canvas->setSizePercent(100.f, 100.f);
-    d2d->deviceContext->CreateSolidColorBrush(D2D1::ColorF(0x1677ff), borderBrush.GetAddressOf());
+    d2d->deviceContext->CreateSolidColorBrush(D2D1::ColorF(Setting::get()->getThemeColor()), borderBrush.GetAddressOf());
     d2d->deviceContext->CreateSolidColorBrush(D2D1::ColorF(0x000000, 0.46f), brushTipBg.GetAddressOf());
     d2d->deviceContext->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), brushTipText.GetAddressOf());
     show();

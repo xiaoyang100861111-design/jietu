@@ -3,6 +3,7 @@
 #include "../App.h"
 #include "../Lang.h"
 #include "WinSetting.h"
+#include "../Setting.h"
 #include "WinSettingCommon.h"
 #include "WinSettingShortcut.h"
 #include "WinSettingAbout.h"
@@ -27,6 +28,14 @@ WinSetting::WinSetting() :Ling::WinBase()
 WinSetting::~WinSetting()
 {
 
+}
+
+namespace {
+	// 主题色换成 Ling::Color 认的 0xRRGGBBAA
+	uint32_t themeRgba()
+	{
+		return (Setting::get()->getThemeColor() << 8) | 0xFF;
+	}
 }
 
 void WinSetting::init()
@@ -87,9 +96,9 @@ void WinSetting::initMenuItems(Ling::Node* menuBox)
 		menuItem->setHeight(40.f);
 		if (i == 0) {
 			menuItem->setColor(0xFFFFFFFF);
-			menuItem->setBg(0x597ef7ff);
+			menuItem->setBg(themeRgba());
 			menuItem->setHoverColor(0xFFFFFFFF);
-			menuItem->setHoverBg(0x597ef7ff);
+			menuItem->setHoverBg(themeRgba());
 			menuItem->setText(Lang::get(L"setting.common"));
 		}
 		else {
@@ -122,9 +131,9 @@ void WinSetting::onMenuItemClick(Ling::Button* menuItem)
 	oldItem->setHoverBg(0xE1E1E3ff);
 	menuIndex = index;
 	menuItem->setColor(0xFFFFFFFF);
-	menuItem->setBg(0x597ef7ff);
+	menuItem->setBg(themeRgba());
 	menuItem->setHoverColor(0xFFFFFFFF);
-	menuItem->setHoverBg(0x597ef7ff);
+	menuItem->setHoverBg(themeRgba());
 
 	body->removeChild(content);
 	if (menuIndex == 0) {

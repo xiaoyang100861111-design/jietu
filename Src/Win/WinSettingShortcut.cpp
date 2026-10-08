@@ -97,7 +97,7 @@ namespace {
 
 WinSettingShortcut::WinSettingShortcut(Ling::WinBase* parent):Ling::Node(parent)
 {
-    std::vector<std::wstring> keys = { L"cap" };
+    std::vector<std::wstring> keys = { L"cap", L"translate" };
     for (auto& key:keys)
     {
         auto box = makeChild<Ling::Node>();
@@ -121,6 +121,38 @@ WinSettingShortcut::WinSettingShortcut(Ling::WinBase* parent):Ling::Node(parent)
         btn->setBorder(1.f, 0xE0E0E0FF);
         btn->onClick.add([this](Ling::Button* btn) {this->onBtnClick(btn);});
         btns.push_back(btn);
+
+        auto border = makeChild<Ling::Node>();
+        border->setHeight(1.f);
+        border->setBg(0xE0E0E0FF);
+    }
+
+    // 鼠标触发：不是键盘组合，点一下按钮在几个选项之间轮换。
+    // 不放进 btns —— 那里面的按钮点了是进"请按键"状态的
+    {
+        auto box = makeChild<Ling::Node>();
+        box->setHeight(39.f);
+        box->setFlexDirection(Ling::FlexDirection::Row);
+        box->setAlignItems(Ling::Align::Center);
+
+        auto label = box->makeChild<Ling::Label>();
+        label->setText(Lang::get(L"shortcut.mouse"));
+        label->setHeightPercent(100.f);
+        label->setJustifyContent(Ling::Justify::Center);
+        label->setFlexGrow(1.f);
+
+        auto btn = box->makeChild<Ling::Button>();
+        btn->setText(Lang::get(std::format(L"shortcut.mouse{}", Setting::get()->getMouseTrigger())));
+        btn->setHeight(28.f);
+        btn->setWidth(120.f);
+        btn->setBg(0xFFFFFFFF);
+        btn->setHoverBg(0xFFFFFFFF);
+        btn->setBorder(1.f, 0xE0E0E0FF);
+        btn->onClick.add([](Ling::Button* btn) {
+            auto val = (Setting::get()->getMouseTrigger() + 1) % 4;
+            Setting::get()->setMouseTrigger(val);
+            btn->setText(Lang::get(std::format(L"shortcut.mouse{}", val)));
+        });
 
         auto border = makeChild<Ling::Node>();
         border->setHeight(1.f);

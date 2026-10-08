@@ -3,6 +3,7 @@
 #include <include/Ling.h>
 #include "CutMask.h"
 #include "../Util.h"
+#include "../Setting.h"
 using namespace Microsoft::WRL;
 
 CutMask::CutMask(Ling::WinBase* win) :win{ win }
@@ -13,7 +14,7 @@ CutMask::CutMask(Ling::WinBase* win) :win{ win }
 	auto d2d = Ling::D2D::get();
 	d2d->deviceContext->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), brushText.GetAddressOf());
 	d2d->deviceContext->CreateSolidColorBrush(D2D1::ColorF(0x000000, 0.46f), brushBg.GetAddressOf());
-	d2d->deviceContext->CreateSolidColorBrush(D2D1::ColorF(0x1677ff), brushBorder.GetAddressOf());
+	d2d->deviceContext->CreateSolidColorBrush(D2D1::ColorF(Setting::get()->getThemeColor()), brushBorder.GetAddressOf());
 	initWinRect();
 }
 

@@ -53,12 +53,13 @@ WinCap::~WinCap()
 {
 }
 
-void WinCap::init()
+void WinCap::init(bool translate)
 {
     // 双击托盘图标会连着来两下，已经开着就不再建第二个
     if (winCap) return;
     auto ptr = new WinCap();
     winCap.reset(ptr);
+	ptr->autoTranslate = translate;
 	ptr->cutMask = std::make_unique<CutMask>(ptr);
     ptr->createNativeWindow(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, WS_POPUP);//WS_EX_TOPMOST
 }
@@ -445,6 +446,13 @@ void WinCap::onUp(POINT pos, bool isRight)
         // 命令行指定了直奔某个阶段：它比下面 Ctrl 那条钉图的快捷路径更优先 ——
         // 参数是用户明确要求的，Ctrl 只是顺手按上的
         if (enterByArg()) return;
+        // "截图翻译"快捷键进来的：框完直接翻译
+        if (autoTranslate) {
+            stage = CapStage::Adjust;
+            refresh();  // 收掉放大镜
+            startTranslate();
+            return;
+        }
         // 默认框完直接进图像标记（画框、箭头、马赛克、翻译都在那边的工具条上）。
         // 按住 Ctrl 框选才留在这里出 ToolCap：长截图、录屏、二维码识别要在截图窗口里做，
         // 选区也只有在这里才能再调整
