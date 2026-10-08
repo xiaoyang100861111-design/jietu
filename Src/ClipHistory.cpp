@@ -628,6 +628,17 @@ void ClipHistory::setPhraseTitle(long long id, const std::wstring& title)
 	}
 }
 
+void ClipHistory::setPhraseGroup(long long id, const std::wstring& group)
+{
+	for (auto& phrase : phrases) {
+		if (phrase->id != id) continue;
+		phrase->group = group;
+		savePhrases();
+		notify();
+		return;
+	}
+}
+
 // phrases.json：{ "groups": [分组名...], "items": [话术...] }，话术的字段比历史多 title / group 两项
 void ClipHistory::loadPhrases()
 {

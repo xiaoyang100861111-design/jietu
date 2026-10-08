@@ -537,7 +537,7 @@ void WinClip::paintRow(ID2D1DeviceContext* ctx, const Row& row, int index, float
 		brush->SetColor(D2D1::ColorF(0x000000, 0.05f));
 		ctx->FillRectangle(D2D1::RectF(0.f, y, w, y + row.height), brush.Get());
 	}
-	const int btnCount = mode == Phrase ? 2 : 3;
+	const int btnCount = 3;
 	const float left = pad + 4.f * dpi;
 	const float right = btnRect(y, row.height, btnCount - 1).left - 6.f * dpi; //右边留给小按钮
 	const float metaTop = y + row.height - 22.f * dpi;
@@ -589,13 +589,14 @@ void WinClip::paintRow(ID2D1DeviceContext* ctx, const Row& row, int index, float
 	}
 	drawText(ctx, meta, 11.f, D2D1::RectF(left, metaTop, right, y + row.height - 4.f * dpi), 0x999999, false, true);
 	// 右边的小按钮，平时淡淡地显示，光标移上去才加深。
-	// 话术页：✕ 删除、✎ 改备注名；剪切板页：✕ 删除、☆ 收藏、＋ 存为话术
+	// 话术页：✕ 删除、✎ 改备注名、⇄ 换分组；剪切板页：✕ 删除、☆ 收藏、＋ 存为话术
 	auto btnColor = [&](Hit which, UINT hoverRgb) -> UINT {
 		return isHover && hover == which ? hoverRgb : 0xBBBBBB;
 	};
 	drawText(ctx, L"✕", 12.f, btnRect(y, row.height, 0), btnColor(Hit::Btn0, 0xE64340), true, true);
 	if (mode == Phrase) {
 		drawText(ctx, L"✎", 14.f, btnRect(y, row.height, 1), btnColor(Hit::Btn1, 0x555555), true, true);
+		drawText(ctx, L"⇄", 14.f, btnRect(y, row.height, 2), btnColor(Hit::Btn2, theme), true, true);
 	}
 	else {
 		drawText(ctx, item.pinned ? L"★" : L"☆", 15.f, btnRect(y, row.height, 1),
@@ -634,7 +635,7 @@ WinClip::Hit WinClip::hitTest(POINT pos, int& index)
 	if (mode == Phrase && py >= h - 42.f * dpi && py < h - 10.f * dpi && px >= pad && px < w - pad) return Hit::AddClip;
 	if (py < listTop() || py >= listBottom()) return Hit::None;
 	const float contentY = py - listTop() + scrollY;
-	const int btnCount = mode == Phrase ? 2 : 3;
+	const int btnCount = 3;
 	for (int i = 0; i < (int)rows.size(); i++) {
 		auto& row = rows[i];
 		if (contentY < row.top || contentY >= row.top + row.height) continue;
@@ -718,6 +719,20 @@ void WinClip::onDown(POINT pos, bool isRight)
 	}
 	else if (hit == Hit::Btn2 && mode == Clip) {
 		toast(Lang::get(history->addPhraseFromItem(rows[index].item->id, L"") ? L"clip.added" : L"clip.addFailed"));
+	}
+	else if (hit == Hit::Btn2) {
+		// 换分组：点一下挪到下一个分组，轮一圈回到未分组
+		auto& groups = history->getGroups();
+		if (groups.empty()) {
+			toast(Lang::get(L"clip.noGroup"));
+			return;
+		}
+		auto item = rows[index].item;
+		auto it = std::find(groups.begin(), groups.end(), item->group);
+		// 现在未分组（找不到）→ 第一个分组；最后一个分组 → 未分组
+		std::wstring next = it == groups.end() ? groups.front() : (it + 1 == groups.end() ? L"" : *(it + 1));
+		history->setPhraseGroup(item->id, next);
+		toast(Lang::get(L"clip.movedTo") + (next.empty() ? Lang::get(L"clip.ungrouped") : next));
 	}
 }
 

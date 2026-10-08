@@ -48,6 +48,8 @@ public:
 	bool addPhraseFromClipboard(const std::wstring& group);
 	void removePhrase(long long id);
 	void setPhraseTitle(long long id, const std::wstring& title);
+	// 换分组。group 为空 = 放回未分组
+	void setPhraseGroup(long long id, const std::wstring& group);
 	// 把前台还给 target，稍等一下再替用户按一次 Ctrl+V
 	void pasteTo(HWND target);
 	std::filesystem::path getImagePath(long long id) const;
