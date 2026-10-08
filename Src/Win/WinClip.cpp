@@ -249,7 +249,7 @@ void WinClip::onMinMaxInfo(MINMAXINFO* mmi)
 
 float WinClip::listTop() const
 {
-	return 118.f * dpi;
+	return (90.f + 28.f * tabRows) * dpi;
 }
 
 float WinClip::listBottom() const
@@ -258,11 +258,19 @@ float WinClip::listBottom() const
 	return h - (mode == Phrase ? 50.f : 6.f) * dpi;
 }
 
+std::wstring WinClip::groupPrefix(int depth) const
+{
+	std::wstring result;
+	for (int i = 0; i < depth && i < (int)path.size(); i++) {
+		if (!result.empty()) result += L'/';
+		result += path[i];
+	}
+	return result;
+}
+
 std::wstring WinClip::curGroup() const
 {
-	if (mode != Phrase || tab <= 0) return L"";
-	auto& groups = ClipHistory::get()->getGroups();
-	return tab - 1 < (int)groups.size() ? groups[tab - 1] : L"";
+	return mode == Phrase ? groupPrefix((int)path.size()) : L"";
 }
 
 // which：从右往左数第几个小按钮
@@ -288,6 +296,7 @@ void WinClip::setMode(int val)
 	if (mode == val) return;
 	mode = val;
 	tab = 0;
+	path.clear();
 	selRow = 0;
 	scrollY = 0.f;
 	query.clear();
@@ -304,25 +313,42 @@ void WinClip::rebuild()
 	tabs.clear();
 	contentH = 0.f;
 	if (!history) return;
-	// 第二排的标签：话术页是"全部 + 各分组 + 新建"，剪切板页是按类型分
-	std::vector<std::wstring> labels;
+	// 选中的分组可能刚被删掉了：从哪一级开始对不上，就把那一级往后的都丢掉
 	if (mode == Phrase) {
-		labels.push_back(Lang::get(L"clip.all"));
-		for (auto& name : history->getGroups()) labels.push_back(name);
-		labels.push_back(L"＋");
-		if (tab > (int)history->getGroups().size()) tab = 0;
+		auto& groups = history->getGroups();
+		for (int depth = 1; depth <= (int)path.size(); depth++) {
+			if (std::find(groups.begin(), groups.end(), groupPrefix(depth)) != groups.end()) continue;
+			path.resize(depth - 1);
+			break;
+		}
 	}
-	else {
-		for (auto key : clipTabKeys) labels.push_back(Lang::get(key));
-	}
-	float left = 10.f * dpi;
-	for (auto& label : labels) {
-		Tab item;
-		item.label = label;
-		item.left = left;
-		item.right = left + textWidth(label, 13.f) + 22.f * dpi;
-		left = item.right;
-		tabs.push_back(std::move(item));
+	// 标签。话术页：第 r 排列的是已选的前 r 级下面的子分组，前面一个"全部"、后面一个"＋"新建；
+	// 最多三级，所以最多三排。剪切板页就一排，按类型分
+	tabRows = mode == Phrase ? (std::min)((int)path.size() + 1, 3) : 1;
+	for (int row = 0; row < tabRows; row++) {
+		float left = 10.f * dpi;
+		auto addTab = [&](Tab::Kind kind, const std::wstring& label, bool selected) {
+			Tab item;
+			item.kind = kind;
+			item.label = label;
+			item.row = row;
+			item.selected = selected;
+			item.left = left;
+			item.right = left + textWidth(label, 13.f) + 22.f * dpi;
+			left = item.right;
+			tabs.push_back(std::move(item));
+		};
+		if (mode == Phrase) {
+			const bool hasSel = (int)path.size() > row;
+			addTab(Tab::Kind::All, Lang::get(L"clip.all"), !hasSel);
+			for (auto& name : history->getChildGroups(groupPrefix(row))) {
+				addTab(Tab::Kind::Item, name, hasSel && path[row] == name);
+			}
+			addTab(Tab::Kind::Plus, L"＋", false);
+		}
+		else {
+			for (int i = 0; i < 5; i++) addTab(Tab::Kind::Item, Lang::get(clipTabKeys[i]), i == tab);
+		}
 	}
 
 	const auto key = toLower(query);
@@ -330,7 +356,8 @@ void WinClip::rebuild()
 	std::vector<std::shared_ptr<ClipHistory::Item>> list;
 	for (auto& item : mode == Phrase ? history->getPhrases() : history->getItems()) {
 		if (mode == Phrase) {
-			if (tab > 0 && item->group != group) continue;
+			// 选到哪一级，就显示那一级和它下面所有子分组里的话术
+			if (!group.empty() && item->group != group && !item->group.starts_with(group + L"/")) continue;
 		}
 		else {
 			if (tab == 1 && item->type != ClipHistory::Type::Text) continue;
@@ -457,18 +484,21 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 		drawText(ctx, typed + L"|", 13.f, searchText, 0x333333, false, true);
 	}
 
-	// 第三排：分类 / 分组
-	const float tabTop = 82.f * dpi, tabBottom = 110.f * dpi;
+	// 分类 / 分组标签，一排或几排
+	const float tabTop = 82.f * dpi, tabH = 28.f * dpi;
+	const float tabBottom = tabTop + tabH * tabRows;
 	// 剪切板页右边留给"清空"，标签多了画不下的就裁掉
 	const float tabsRight = w - pad - (mode == Clip ? 54.f * dpi : 0.f);
 	ctx->PushAxisAlignedClip(D2D1::RectF(0.f, tabTop, tabsRight, tabBottom), D2D1_ANTIALIAS_MODE_ALIASED);
 	for (int i = 0; i < (int)tabs.size(); i++) {
-		auto rect = D2D1::RectF(tabs[i].left, tabTop, tabs[i].right, tabBottom);
+		auto& item = tabs[i];
+		const float rowTop = tabTop + tabH * item.row;
+		auto rect = D2D1::RectF(item.left, rowTop, item.right, rowTop + tabH);
 		const bool isHover = hover == Hit::Tab && hoverIndex == i;
-		drawText(ctx, tabs[i].label, 13.f, rect, i == tab ? theme : isHover ? 0x333333 : 0x777777, true, true);
-		if (i == tab) {
+		drawText(ctx, item.label, 13.f, rect, item.selected ? theme : isHover ? 0x333333 : 0x777777, true, true);
+		if (item.selected) {
 			brush->SetColor(D2D1::ColorF(theme));
-			ctx->FillRectangle(D2D1::RectF(rect.left + 8.f * dpi, tabBottom - 2.f * dpi, rect.right - 8.f * dpi, tabBottom), brush.Get());
+			ctx->FillRectangle(D2D1::RectF(rect.left + 8.f * dpi, rect.bottom - 2.f * dpi, rect.right - 8.f * dpi, rect.bottom), brush.Get());
 		}
 	}
 	ctx->PopAxisAlignedClip();
@@ -544,7 +574,15 @@ void WinClip::paintRow(ID2D1DeviceContext* ctx, const Row& row, int index, float
 	auto mainRect = D2D1::RectF(left, y + 8.f * dpi, right, metaTop);
 	// 备注名：文字类的直接顶在内容前面，图片 / 文件的放到下面那行小字里
 	const std::wstring titleTag = item.title.empty() ? L"" : L"【" + item.title + L"】";
-	std::wstring meta = mode == Phrase ? item.group : timeStr(item.id);
+	// 话术的小字里写它在哪个分组，各级之间用 › 隔开
+	std::wstring meta = timeStr(item.id);
+	if (mode == Phrase) {
+		meta.clear();
+		for (auto c : item.group) {
+			if (c == L'/') meta += L" › ";
+			else meta += c;
+		}
+	}
 	auto addMeta = [&meta](const std::wstring& part) {
 		if (part.empty()) return;
 		if (!meta.empty()) meta += L"   ";
@@ -621,11 +659,13 @@ WinClip::Hit WinClip::hitTest(POINT pos, int& index)
 		}
 		return Hit::None;
 	}
-	if (py >= 82.f * dpi && py < 110.f * dpi) {
+	const float tabTop = 82.f * dpi, tabH = 28.f * dpi;
+	if (py >= tabTop && py < tabTop + tabH * tabRows) {
 		if (mode == Clip && px >= w - pad - 50.f * dpi && px < w - pad) return Hit::Clear;
 		if (px >= w - pad - (mode == Clip ? 54.f * dpi : 0.f)) return Hit::None;
+		const int row = (int)((py - tabTop) / tabH);
 		for (int i = 0; i < (int)tabs.size(); i++) {
-			if (px >= tabs[i].left && px < tabs[i].right) {
+			if (tabs[i].row == row && px >= tabs[i].left && px < tabs[i].right) {
 				index = i;
 				return Hit::Tab;
 			}
@@ -675,19 +715,32 @@ void WinClip::onDown(POINT pos, bool isRight)
 		return;
 	}
 	if (hit == Hit::Tab && mode == Phrase) {
-		const int groupCount = (int)history->getGroups().size();
-		if (index == groupCount + 1) { //最后那个"＋"
-			if (!isRight) beginInput(Input::Group);
+		auto item = tabs[index]; //下面会重建 tabs，先抄一份出来
+		if (item.kind == Tab::Kind::Plus) {
+			// 在这一排对应的那一级下面新建分组
+			if (!isRight) {
+				inputParent = groupPrefix(item.row);
+				beginInput(Input::Group);
+			}
 			return;
 		}
-		// 右键点分组：删掉这个分组（里面的话术回到未分组）
-		if (isRight && index >= 1 && index <= groupCount) {
-			auto name = history->getGroups()[index - 1];
-			if (tab == index) tab = 0;
-			else if (tab > index) tab--;
-			history->removeGroup(name);
+		if (item.kind == Tab::Kind::Item && isRight) {
+			// 右键点分组：删掉它和它下面的子分组（话术挪到上一级）
+			auto parent = groupPrefix(item.row);
+			auto full = parent.empty() ? item.label : parent + L"/" + item.label;
+			if ((int)path.size() > item.row && path[item.row] == item.label) path.resize(item.row);
+			history->removeGroup(full);
 			return;
 		}
+		if (isRight) return;
+		// 左键：选中这一级（"全部"则退回上一级），更深的选择一并清掉
+		path.resize((std::min)((int)path.size(), item.row));
+		if (item.kind == Tab::Kind::Item) path.push_back(item.label);
+		scrollY = 0.f;
+		selRow = 0;
+		rebuild();
+		refresh();
+		return;
 	}
 	if (isRight) return;
 	if (hit == Hit::Mode) {
@@ -721,8 +774,8 @@ void WinClip::onDown(POINT pos, bool isRight)
 		toast(Lang::get(history->addPhraseFromItem(rows[index].item->id, L"") ? L"clip.added" : L"clip.addFailed"));
 	}
 	else if (hit == Hit::Btn2) {
-		// 换分组：点一下挪到下一个分组，轮一圈回到未分组
-		auto& groups = history->getGroups();
+		// 换分组：点一下挪到下一个分组（按树的顺序，子分组紧跟在父分组后面），轮一圈回到未分组
+		auto groups = history->getGroupTree();
 		if (groups.empty()) {
 			toast(Lang::get(L"clip.noGroup"));
 			return;
@@ -732,7 +785,9 @@ void WinClip::onDown(POINT pos, bool isRight)
 		// 现在未分组（找不到）→ 第一个分组；最后一个分组 → 未分组
 		std::wstring next = it == groups.end() ? groups.front() : (it + 1 == groups.end() ? L"" : *(it + 1));
 		history->setPhraseGroup(item->id, next);
-		toast(Lang::get(L"clip.movedTo") + (next.empty() ? Lang::get(L"clip.ungrouped") : next));
+		auto shown = next.empty() ? Lang::get(L"clip.ungrouped") : next;
+		for (size_t pos = 0; (pos = shown.find(L'/', pos)) != std::wstring::npos; pos += 3) shown.replace(pos, 1, L" › ");
+		toast(Lang::get(L"clip.movedTo") + shown);
 	}
 }
 
@@ -771,8 +826,21 @@ void WinClip::endInput(bool commit)
 		const auto from = text.find_first_not_of(L" \t");
 		const auto to = text.find_last_not_of(L" \t");
 		text = from == std::wstring::npos ? L"" : text.substr(from, to - from + 1);
+		// 名字里不能有 /，那是各级分组之间的分隔符
+		std::erase(text, L'/');
 		if (kind == Input::Group && !text.empty()) {
-			if (history->addGroup(text)) tab = (int)history->getGroups().size(); //直接切到新建的分组
+			// 建好（或者本来就有同名的）直接切过去
+			auto parent = inputParent;
+			history->addGroup(parent.empty() ? text : parent + L"/" + text);
+			path.clear();
+			size_t start{ 0 };
+			while (!parent.empty() && start <= parent.size()) {
+				auto pos = parent.find(L'/', start);
+				path.push_back(parent.substr(start, pos == std::wstring::npos ? pos : pos - start));
+				if (pos == std::wstring::npos) break;
+				start = pos + 1;
+			}
+			path.push_back(text);
 		}
 		else if (kind == Input::Title) {
 			history->setPhraseTitle(id, text); //留空 = 去掉备注名

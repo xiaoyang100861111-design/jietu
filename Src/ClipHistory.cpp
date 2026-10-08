@@ -552,14 +552,46 @@ bool ClipHistory::addGroup(const std::wstring& name)
 
 void ClipHistory::removeGroup(const std::wstring& name)
 {
-	auto it = std::find(groups.begin(), groups.end(), name);
-	if (it == groups.end()) return;
-	groups.erase(it);
+	if (name.empty()) return;
+	const auto prefix = name + L"/";
+	auto inside = [&](const std::wstring& path) { return path == name || path.starts_with(prefix); };
+	if (std::none_of(groups.begin(), groups.end(), inside)) return;
+	std::erase_if(groups, inside);
+	const auto slash = name.find_last_of(L'/');
+	const std::wstring parent = slash == std::wstring::npos ? L"" : name.substr(0, slash);
 	for (auto& phrase : phrases) {
-		if (phrase->group == name) phrase->group.clear();
+		if (inside(phrase->group)) phrase->group = parent;
 	}
 	savePhrases();
 	notify();
+}
+
+std::vector<std::wstring> ClipHistory::getChildGroups(const std::wstring& prefix) const
+{
+	std::vector<std::wstring> result;
+	const auto head = prefix.empty() ? L"" : prefix + L"/";
+	for (auto& path : groups) {
+		if (!path.starts_with(head)) continue;
+		auto name = path.substr(head.size());
+		// 只要紧挨着的那一级：剩下的部分里不能再有 /
+		if (name.empty() || name.find(L'/') != std::wstring::npos) continue;
+		result.push_back(std::move(name));
+	}
+	return result;
+}
+
+std::vector<std::wstring> ClipHistory::getGroupTree() const
+{
+	std::vector<std::wstring> result;
+	auto walk = [&](auto& self, const std::wstring& prefix) -> void {
+		for (auto& name : getChildGroups(prefix)) {
+			auto path = prefix.empty() ? name : prefix + L"/" + name;
+			result.push_back(path);
+			self(self, path);
+		}
+	};
+	walk(walk, L"");
+	return result;
 }
 
 bool ClipHistory::addPhraseFromItem(long long historyId, const std::wstring& group)

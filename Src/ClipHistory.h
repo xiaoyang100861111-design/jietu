@@ -20,7 +20,8 @@ public:
 		std::wstring text;          // Text：内容；Files：各路径用 \n 连起来；Image：空
 		int imgW{ 0 }, imgH{ 0 };
 		unsigned long long hash{ 0 }; // 去重用：同样的东西再复制一遍只是挪到最前面
-		// 下面两项只有快捷话术用：备注名（可空）和所在分组（空 = 未分组）
+		// 下面两项只有快捷话术用：备注名（可空）和所在分组（空 = 未分组）。
+		// 分组最多三级，存的是完整路径，各级之间用 / 隔开，如 "美国/第一阶段/首充"
 		std::wstring title, group;
 	};
 	~ClipHistory();
@@ -40,8 +41,12 @@ public:
 	const std::vector<std::wstring>& getGroups() const { return groups; }
 	// 名字为空或者已经有了返回 false
 	bool addGroup(const std::wstring& name);
-	// 删分组不删话术，里面的话术回到"未分组"
+	// 连同下面的子分组一起删。不删话术，里面的话术挪到上一级分组（没有上一级就是未分组）
 	void removeGroup(const std::wstring& name);
+	// prefix 下面的直接子分组的名字（只是那一级的名字，不是完整路径）。prefix 为空取一级分组
+	std::vector<std::wstring> getChildGroups(const std::wstring& prefix) const;
+	// 所有分组的完整路径，按树的顺序（父在前，紧跟着它的子孙）
+	std::vector<std::wstring> getGroupTree() const;
 	// 把一条历史记录抄进话术
 	bool addPhraseFromItem(long long historyId, const std::wstring& group);
 	// 把系统剪切板里现在的内容存成一条话术

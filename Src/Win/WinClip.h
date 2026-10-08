@@ -26,10 +26,15 @@ private:
 		std::shared_ptr<ClipHistory::Item> item;
 		float top{ 0.f }, height{ 0.f };
 	};
-	// 第二排的分类 / 分组标签。left、right 是窗口坐标
+	// 搜索框下面的分类 / 分组标签。left、right 是窗口坐标。
+	// 剪切板页只有一排（按类型分）；话术页每一级分组一排，选中上一级才出现下一级，最多三排
 	struct Tab {
+		enum class Kind { All, Item, Plus };
+		Kind kind{ Kind::Item };
 		std::wstring label;
 		float left{ 0.f }, right{ 0.f };
+		int row{ 0 };
+		bool selected{ false };
 	};
 	// 光标落在什么东西上。Btn0~2 是一行右边的小按钮，从右往左数
 	enum class Hit { None, Mode, Tab, Clear, Row, Btn0, Btn1, Btn2, AddClip };
@@ -68,8 +73,10 @@ private:
 	ID2D1Bitmap1* getThumb(const ClipHistory::Item& item);
 	float listTop() const;
 	float listBottom() const;
-	// 当前选中的话术分组名，"全部"是空串
+	// 当前选中的话术分组的完整路径，一级都没选是空串
 	std::wstring curGroup() const;
+	// path 的前 depth 级拼成的路径
+	std::wstring groupPrefix(int depth) const;
 	D2D1_RECT_F btnRect(float rowY, float rowH, int which) const;
 private:
 	// 弹出面板之前在前台的窗口，粘贴要粘回它那儿去
@@ -80,7 +87,10 @@ private:
 	std::vector<Tab> tabs;
 	float contentH{ 0.f }, scrollY{ 0.f };
 	int mode{ Phrase };
-	int tab{ 0 };            // 话术页：0 全部，其余是分组；剪切板页：0 全部 1 文本 2 图片 3 文件 4 收藏
+	int tab{ 0 };            // 剪切板页的分类：0 全部 1 文本 2 图片 3 文件 4 收藏
+	// 话术页当前选中的分组，一级一个名字，最多三级。空 = 全部
+	std::vector<std::wstring> path;
+	int tabRows{ 1 };        // 标签现在有几排，列表的起始位置跟着它走
 	int selRow{ 0 };         // 键盘选中的行
 	int hoverIndex{ -1 };
 	Hit hover{ Hit::None };
@@ -88,6 +98,7 @@ private:
 	Input input{ Input::Search };
 	std::wstring inputText;  // 新建分组 / 改备注名时正在输入的字
 	long long inputId{ 0 };  // 改备注名时是哪一条
+	std::wstring inputParent; // 新建分组时建在哪个分组下面（空 = 一级分组）
 	std::wstring toastText;
 	bool closing{ false };
 	// 贴边滑出的：0 不是。鼠标移开就收，靠定时器看光标位置
