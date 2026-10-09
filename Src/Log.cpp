@@ -126,26 +126,30 @@ void Log::write(const std::wstring& text)
 	file << Ling::Util::convertToStr(L"[" + nowStr() + L"] " + text + L"\r\n");
 }
 
+std::wstring Log::describe()
+{
+	auto cur = std::current_exception();
+	if (!cur) return L"no active exception";
+	try {
+		std::rethrow_exception(cur);
+	}
+	catch (const winrt::hresult_error& e) {
+		std::wstring msg{ e.message() };
+		// 系统给的解释常常带着结尾的换行
+		while (!msg.empty() && (msg.back() == L'\r' || msg.back() == L'\n' || msg.back() == L' ')) msg.pop_back();
+		return std::format(L"0x{:08X} {}", static_cast<uint32_t>(e.code().value), msg);
+	}
+	catch (const std::exception& e) {
+		return Ling::Util::convertToWStr(e.what());
+	}
+	catch (...) {
+	}
+	return L"unknown exception";
+}
+
 void Log::exception(const std::wstring& where)
 {
-	std::wstring detail{ L"unknown exception" };
-	if (auto cur = std::current_exception()) {
-		try {
-			std::rethrow_exception(cur);
-		}
-		catch (const winrt::hresult_error& e) {
-			detail = std::format(L"hresult 0x{:08X} {}", static_cast<uint32_t>(e.code().value), std::wstring{ e.message() });
-		}
-		catch (const std::exception& e) {
-			detail = Ling::Util::convertToWStr(e.what());
-		}
-		catch (...) {
-		}
-	}
-	else {
-		detail = L"no active exception";
-	}
-	write(L"ERROR " + where + L": " + detail);
+	write(L"ERROR " + where + L": " + describe());
 }
 
 std::filesystem::path Log::getPath()

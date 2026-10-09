@@ -30,8 +30,11 @@ namespace {
 	using winrt::Windows::Security::Cryptography::CryptographicBuffer;
 	using winrt::Windows::Storage::Streams::UnicodeEncoding;
 
-	constexpr std::wstring_view msAuthUrl{ L"https://edge.microsoft.com/translate/auth" };
-	constexpr std::wstring_view msTransUrl{ L"https://api-edge.cognitive.microsofttranslator.com/translate?api-version=3.0&textType=plain&to=" };
+	// 微软：必应翻译网页版用的接口。（原先用的是 Edge 浏览器的那个免密钥接口，
+	// 它取令牌的地址 edge.microsoft.com/translate/auth 已经下线了，返回 404）
+	constexpr std::wstring_view bingPageUrl{ L"https://www.bing.com/translator" };
+	// 腾讯交互翻译的网页接口：国内直连，Google / 必应都到不了的网络下靠它兜底
+	constexpr std::wstring_view tencentUrl{ L"https://transmart.qq.com/api/imt" };
 	constexpr std::wstring_view googleUrl{ L"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&dt=t&tl=" };
 
 	// OCR 认出来的一行
@@ -43,12 +46,18 @@ namespace {
 	// 给用户看的失败原因。带着文案的 key 一路抛到 start 里的 catch，在那儿统一换成文案
 	struct WorkError {
 		std::wstring key;
+		// 具体是哪一步、什么错（错误码 + 系统的解释），接在文案后面一起给用户看，也方便把截图发回来排查
+		std::wstring detail;
 	};
 
 	// 微软接口的令牌，有效期十分钟，留点余量按八分钟用
+	// 必应翻译页面里带出来的几样凭据，有效期一小时，留点余量按半小时用
+	struct BingAuth {
+		std::wstring host, ig, key, token;
+		std::chrono::steady_clock::time_point time{};
+	};
 	std::mutex tokenMutex;
-	std::wstring msToken;
-	std::chrono::steady_clock::time_point msTokenTime{};
+	BingAuth bingAuth;
 
 	bool isHan(wchar_t c) { return c >= 0x4E00 && c <= 0x9FFF; }
 	bool isKana(wchar_t c) { return c >= 0x3040 && c <= 0x30FF; }
@@ -527,53 +536,150 @@ namespace {
 		return target;
 	}
 
-	std::wstring getMsToken(const HttpClient& client)
+	// 带着说明文字的失败（接口返回了看不懂的内容之类，没有系统错误码可用）
+	[[noreturn]] void fail(const std::wstring& msg)
+	{
+		throw winrt::hresult_error(E_FAIL, msg);
+	}
+
+	// 把各段原文用换行连成一批批的请求文本：每批不超过 maxChars 个字（单独一段就超了的自成一批）。
+	// 返回每一批覆盖的段落下标范围 [from, to)
+	std::vector<std::pair<size_t, size_t>> makeBatches(const std::vector<Translate::Block>& blocks, size_t maxChars)
+	{
+		std::vector<std::pair<size_t, size_t>> batches;
+		size_t from{ 0 };
+		while (from < blocks.size()) {
+			size_t to{ from }, chars{ 0 };
+			while (to < blocks.size() && (to == from || chars + blocks[to].src.size() + 1 <= maxChars)) {
+				chars += blocks[to].src.size() + 1;
+				to++;
+			}
+			batches.push_back({ from, to });
+			from = to;
+		}
+		return batches;
+	}
+
+	std::wstring joinLines(const std::vector<Translate::Block>& blocks, size_t from, size_t to)
+	{
+		std::wstring joined;
+		for (size_t i = from; i < to; i++) {
+			if (i != from) joined += L'\n';
+			joined += blocks[i].src;
+		}
+		return joined;
+	}
+
+	// 译文按换行拆回各段。段数对不上说明接口把换行吃掉 / 多加了，这一家的结果就不能用
+	void splitLines(const std::wstring& all, std::vector<Translate::Block>& blocks, size_t from, size_t to)
+	{
+		std::vector<std::wstring> parts;
+		size_t start{ 0 };
+		while (true) {
+			auto pos = all.find(L'\n', start);
+			auto part = all.substr(start, pos == std::wstring::npos ? pos : pos - start);
+			if (!part.empty() && part.back() == L'\r') part.pop_back();
+			parts.push_back(std::move(part));
+			if (pos == std::wstring::npos) break;
+			start = pos + 1;
+		}
+		if (parts.size() != to - from) fail(std::format(L"line count mismatch: sent {}, got {}", to - from, parts.size()));
+		for (size_t i = from; i < to; i++) blocks[i].dst = parts[i - from];
+	}
+
+	// 从一段网页源码里抠出 prefix 后面、一直到 stop 字符之前的那一截
+	std::wstring between(const std::wstring& html, std::wstring_view prefix, std::wstring_view stops)
+	{
+		auto pos = html.find(prefix);
+		if (pos == std::wstring::npos) return L"";
+		pos += prefix.size();
+		auto end = html.find_first_of(stops, pos);
+		return end == std::wstring::npos ? L"" : html.substr(pos, end - pos);
+	}
+
+	BingAuth getBingAuth(const HttpClient& client)
 	{
 		std::lock_guard lock{ tokenMutex };
 		auto now = std::chrono::steady_clock::now();
-		if (!msToken.empty() && now - msTokenTime < std::chrono::minutes(8)) return msToken;
-		msToken = std::wstring{ waitOp(client.GetStringAsync(Uri{ msAuthUrl })) };
-		msTokenTime = now;
-		return msToken;
-	}
-
-	// 一次请求翻一批：blocks[from, to)
-	void msTranslateBatch(const HttpClient& client, const std::wstring& token, const std::wstring& target,
-		std::vector<Translate::Block>& blocks, size_t from, size_t to)
-	{
-		JsonArray body;
-		for (size_t i = from; i < to; i++) {
-			JsonObject item;
-			item.SetNamedValue(L"Text", JsonValue::CreateStringValue(blocks[i].src));
-			body.Append(item);
-		}
-		HttpRequestMessage req{ HttpMethod::Post(), Uri{ std::wstring{ msTransUrl } + target } };
-		req.Content(HttpStringContent{ body.Stringify(), UnicodeEncoding::Utf8, L"application/json" });
-		req.Headers().TryAppendWithoutValidation(L"Authorization", L"Bearer " + token);
-		auto resp = waitOp(client.SendRequestAsync(req));
+		if (!bingAuth.token.empty() && now - bingAuth.time < std::chrono::minutes(30)) return bingAuth;
+		// 翻译页面的源码里带着调接口要用的 IG、key、token。国内访问会被跳转到 cn.bing.com，
+		// 后面的接口得打到同一个域名上，所以记下最终落在哪个域名
+		auto resp = waitOp(client.GetAsync(Uri{ bingPageUrl }), 12);
 		resp.EnsureSuccessStatusCode();
-		std::wstring text{ waitOp(resp.Content().ReadAsStringAsync()) };
-		auto arr = JsonArray::Parse(text);
-		if (arr.Size() != to - from) throw winrt::hresult_error(E_FAIL);
-		for (uint32_t i = 0; i < arr.Size(); i++) {
-			auto trans = arr.GetObjectAt(i).GetNamedArray(L"translations");
-			blocks[from + i].dst = std::wstring{ trans.GetObjectAt(0).GetNamedString(L"text") };
-		}
+		std::wstring html{ waitOp(resp.Content().ReadAsStringAsync(), 12) };
+		BingAuth auth;
+		auth.host = std::wstring{ resp.RequestMessage().RequestUri().Host() };
+		auth.ig = between(html, L"IG:\"", L"\"");
+		// params_AbusePreventionHelper = [1791572419095,"xIz8W...",3600000]
+		auth.key = between(html, L"params_AbusePreventionHelper = [", L",");
+		auth.token = between(html, L"params_AbusePreventionHelper = [" + auth.key + L",\"", L"\"");
+		if (auth.host.empty() || auth.ig.empty() || auth.key.empty() || auth.token.empty()) fail(L"bing: cannot find token in page");
+		auth.time = now;
+		bingAuth = auth;
+		return auth;
 	}
 
 	void msTranslate(const HttpClient& client, const std::wstring& target, std::vector<Translate::Block>& blocks)
 	{
-		auto token = getMsToken(client);
-		// 接口对单次请求的条数和总字数都有上限，分批发
-		size_t from{ 0 };
-		while (from < blocks.size()) {
-			size_t to{ from }, chars{ 0 };
-			while (to < blocks.size() && to - from < 100 && (to == from || chars + blocks[to].src.size() <= 8000)) {
-				chars += blocks[to].src.size();
-				to++;
-			}
-			msTranslateBatch(client, token, target, blocks, from, to);
-			from = to;
+		auto auth = getBingAuth(client);
+		// 这个接口单次最多收一千字左右
+		for (auto [from, to] : makeBatches(blocks, 900)) {
+			auto url = std::format(L"https://{}/ttranslatev3?isVertical=1&&IG={}&IID=translator.5023", auth.host, auth.ig);
+			auto form = std::format(L"fromLang=auto-detect&to={}&token={}&key={}&text={}", target,
+				std::wstring{ Uri::EscapeComponent(auth.token) }, auth.key,
+				std::wstring{ Uri::EscapeComponent(joinLines(blocks, from, to)) });
+			HttpRequestMessage req{ HttpMethod::Post(), Uri{ url } };
+			req.Content(HttpStringContent{ form, UnicodeEncoding::Utf8, L"application/x-www-form-urlencoded" });
+			req.Headers().TryAppendWithoutValidation(L"Referer", L"https://" + auth.host + L"/translator");
+			auto resp = waitOp(client.SendRequestAsync(req), 15);
+			resp.EnsureSuccessStatusCode();
+			std::wstring text{ waitOp(resp.Content().ReadAsStringAsync(), 15) };
+			// 正常是个数组：[{"translations":[{"text":"…"}]}]。出错（要验证码、凭据过期）时是个对象
+			JsonArray arr{ nullptr };
+			if (!JsonArray::TryParse(text, arr) || arr.Size() == 0) fail(L"bing: " + text.substr(0, 160));
+			auto trans = arr.GetObjectAt(0).GetNamedArray(L"translations");
+			splitLines(std::wstring{ trans.GetObjectAt(0).GetNamedString(L"text") }, blocks, from, to);
+		}
+	}
+
+	// 腾讯交互翻译。它的语言代码是自己的一套
+	void tencentTranslate(const HttpClient& client, const std::wstring& target, std::vector<Translate::Block>& blocks)
+	{
+		std::wstring lang = target.starts_with(L"zh-Hant") ? L"zh-TW" : target.starts_with(L"zh") ? L"zh" : target;
+		GUID guid{};
+		CoCreateGuid(&guid);
+		wchar_t guidStr[40]{};
+		StringFromGUID2(guid, guidStr, 40);
+		std::wstring id{ guidStr };
+		std::erase_if(id, [](wchar_t c) { return c == L'{' || c == L'}'; });
+		const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::system_clock::now().time_since_epoch()).count();
+		for (auto [from, to] : makeBatches(blocks, 4000)) {
+			JsonArray list;
+			for (size_t i = from; i < to; i++) list.Append(JsonValue::CreateStringValue(blocks[i].src));
+			JsonObject header, source, dest, body;
+			header.SetNamedValue(L"fn", JsonValue::CreateStringValue(L"auto_translation"));
+			header.SetNamedValue(L"client_key", JsonValue::CreateStringValue(
+				std::format(L"browser-chrome-126.0.0-Windows_10-{}-{}", id, ms)));
+			source.SetNamedValue(L"lang", JsonValue::CreateStringValue(L"auto"));
+			source.SetNamedValue(L"text_list", list);
+			dest.SetNamedValue(L"lang", JsonValue::CreateStringValue(lang));
+			body.SetNamedValue(L"header", header);
+			body.SetNamedValue(L"type", JsonValue::CreateStringValue(L"plain"));
+			body.SetNamedValue(L"model_category", JsonValue::CreateStringValue(L"normal"));
+			body.SetNamedValue(L"source", source);
+			body.SetNamedValue(L"target", dest);
+			HttpRequestMessage req{ HttpMethod::Post(), Uri{ tencentUrl } };
+			req.Content(HttpStringContent{ body.Stringify(), UnicodeEncoding::Utf8, L"application/json" });
+			req.Headers().TryAppendWithoutValidation(L"Referer", L"https://transmart.qq.com/zh-CN/index");
+			auto resp = waitOp(client.SendRequestAsync(req), 15);
+			resp.EnsureSuccessStatusCode();
+			std::wstring text{ waitOp(resp.Content().ReadAsStringAsync(), 15) };
+			JsonObject obj{ nullptr };
+			if (!JsonObject::TryParse(text, obj)) fail(L"tencent: " + text.substr(0, 160));
+			auto arr = obj.GetNamedArray(L"auto_translation", nullptr);
+			if (!arr || arr.Size() != to - from) fail(L"tencent: " + text.substr(0, 160));
+			for (uint32_t i = 0; i < arr.Size(); i++) blocks[from + i].dst = std::wstring{ arr.GetStringAt(i) };
 		}
 	}
 
@@ -612,49 +718,57 @@ namespace {
 		for (size_t i = 0; i < blocks.size(); i++) blocks[i].dst = parts[i];
 	}
 
-	// googleFirst：先用哪家。选的那家不通（接口挂了、网络到不了）就自动换另一家
-	void translate(const std::wstring& target, std::vector<Translate::Block>& blocks, bool googleFirst)
+	// engine：用户选的那一家（google / microsoft / tencent）先试，不通再挨个试另外两家。
+	// 全都不通就把每一家各自的错误原因带出去
+	void translate(const std::wstring& target, std::vector<Translate::Block>& blocks, const std::wstring& engine)
 	{
 		HttpClient client;
 		client.DefaultRequestHeaders().UserAgent().TryParseAdd(
 			L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0");
-		auto tryOne = [&](bool google) {
+		std::vector<std::wstring> order{ L"google", L"microsoft", L"tencent" };
+		if (auto it = std::find(order.begin(), order.end(), engine); it != order.end()) std::rotate(order.begin(), it, it + 1);
+		std::wstring detail;
+		for (auto& name : order) {
 			try {
-				if (google) googleTranslate(client, target, blocks);
-				else msTranslate(client, target, blocks);
-				return true;
+				if (name == L"google") googleTranslate(client, target, blocks);
+				else if (name == L"microsoft") msTranslate(client, target, blocks);
+				else tencentTranslate(client, target, blocks);
+				return;
 			}
 			catch (...) {
-				Log::exception(google ? L"translate (google)" : L"translate (microsoft)");
-				if (!google) {
-					// 令牌可能是被服务端提前作废的，清掉，下次重新要
+				auto why = Log::describe();
+				Log::write(L"ERROR translate (" + name + L"): " + why);
+				if (!detail.empty()) detail += L"\n";
+				detail += name + L": " + why;
+				if (name == L"microsoft") {
+					// 凭据可能是被服务端提前作废的，清掉，下次重新取
 					std::lock_guard lock{ tokenMutex };
-					msToken.clear();
+					bingAuth = {};
 				}
-				return false;
 			}
-		};
-		if (tryOne(googleFirst) || tryOne(!googleFirst)) return;
-		throw WorkError{ L"translate.netError" };
+		}
+		throw WorkError{ L"translate.netError", detail };
 	}
 
 	// 在 UI 线程上从配置里取好、带到后台线程去用的几个选项
 	struct Options {
 		std::wstring target;        // 目标语言
 		bool googleOcr{ true };     // 文字识别用 Google（否则用系统自带的）
-		bool googleFirst{ true };   // 翻译先用 Google（否则先用微软）
+		std::wstring engine{ L"google" }; // 翻译先用哪家：google / microsoft / tencent
 	};
 
 	void work(int w, int h, const std::vector<BYTE>& pixels, bool needTranslate, const Options& opt, Translate::Result& result)
 	{
 		// 选了 Google 识别就先试它；没认出字、或者接口不通，退回系统自带的识别
 		bool googleFailed{ false };
+		std::wstring ocrDetail;
 		if (opt.googleOcr) {
 			try {
 				result.blocks = recognizeGoogle(w, h, pixels);
 			}
 			catch (...) {
-				Log::exception(L"ocr (google)");
+				ocrDetail = L"google ocr: " + Log::describe();
+				Log::write(L"ERROR " + ocrDetail);
 				result.blocks.clear();
 				googleFailed = true;
 			}
@@ -670,13 +784,16 @@ namespace {
 			}
 		}
 		// 在线识别没连上，系统自带的又认不出来（多半是它不支持的文字）：把真正的原因告诉用户
-		if (result.blocks.empty()) throw WorkError{ googleFailed ? L"translate.ocrNetError" : L"translate.noText" };
+		if (result.blocks.empty()) {
+			if (googleFailed) throw WorkError{ L"translate.ocrNetError", ocrDetail };
+			throw WorkError{ L"translate.noText" };
+		}
 		for (auto& block : result.blocks) {
 			if (!result.text.empty()) result.text += L"\r\n";
 			result.text += block.src;
 		}
 		if (needTranslate) {
-			translate(pickTarget(opt.target, countChars(result.blocks)), result.blocks, opt.googleFirst);
+			translate(pickTarget(opt.target, countChars(result.blocks)), result.blocks, opt.engine);
 		}
 		result.ok = true;
 	}
@@ -687,22 +804,26 @@ namespace {
 		// 识别和网络请求都可能卡上一两秒，挂在 UI 线程上整个应用就不动了
 		co_await winrt::resume_background();
 		auto result = std::make_shared<Translate::Result>();
-		std::wstring errKey;
+		std::wstring errKey, errDetail;
 		try {
 			work(w, h, *pixels, needTranslate, opt, *result);
 		}
 		catch (const WorkError& e) {
 			errKey = e.key;
+			errDetail = e.detail;
 		}
 		catch (...) {
-			Log::exception(L"ocr / translate");
+			errDetail = Log::describe();
+			Log::write(L"ERROR ocr / translate: " + errDetail);
 			errKey = L"translate.failed";
 		}
 		// Lang 和回调里要碰的窗口都只在 UI 线程上用
-		Ling::App::get()->dq.TryEnqueue([result, errKey, cb]() {
+		Ling::App::get()->dq.TryEnqueue([result, errKey, errDetail, cb]() {
 			if (!errKey.empty()) {
 				result->ok = false;
 				result->err = Lang::get(errKey);
+				// 具体原因附在后面：截个图发回来就知道卡在哪一步
+				if (!errDetail.empty()) result->err += L"\n\n" + Lang::get(L"translate.detail") + L"\n" + errDetail;
 			}
 			cb(result);
 		});
@@ -776,7 +897,7 @@ void Translate::start(int w, int h, const std::vector<BYTE>& pixels, bool needTr
 	opt.target = setting->getTranslateTarget();
 	if (opt.target.empty() || opt.target == L"auto") opt.target = langToTarget(setting->getLang());
 	opt.googleOcr = setting->getOcrEngine() == L"google";
-	opt.googleFirst = setting->getTranslateEngine() == L"google";
+	opt.engine = setting->getTranslateEngine();
 	run(w, h, std::make_shared<std::vector<BYTE>>(pixels), needTranslate, opt, std::move(cb));
 }
 

@@ -234,7 +234,9 @@ void WinSettingCommon::initEngineCtrls()
         btn->setText(Lang::get(std::wstring{ L"setting.ocr_" } + next));
     });
     makeRow(L"setting.transEngine", Lang::get(L"setting.trans_" + setting->getTranslateEngine()))->onClick.add([](Ling::Button* btn) {
-        auto next = Setting::get()->getTranslateEngine() == L"google" ? L"microsoft" : L"google";
+        // google → microsoft → tencent → google
+        auto cur = Setting::get()->getTranslateEngine();
+        auto next = cur == L"google" ? L"microsoft" : cur == L"microsoft" ? L"tencent" : L"google";
         Setting::get()->setTranslateEngine(next);
         btn->setText(Lang::get(std::wstring{ L"setting.trans_" } + next));
     });

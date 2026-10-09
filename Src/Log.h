@@ -15,5 +15,7 @@ public:
 	static void write(const std::wstring& text);
 	// 在 catch 块里调：把当前正在处理的那个异常的类型和错误信息记下来。where 说明是在干什么的时候出的错
 	static void exception(const std::wstring& where);
+	// 在 catch 块里调：当前这个异常的说明文字（错误码 + 系统给的解释），给用户看的弹窗里也用它
+	static std::wstring describe();
 	static std::filesystem::path getPath();
 };
