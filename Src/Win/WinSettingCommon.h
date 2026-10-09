@@ -15,6 +15,7 @@ private:
 	void initThemeCtrls();
 	void initClipCtrls();
 	void initUpdateCtrls();
+	void initEngineCtrls();
 	void initDockCtrls();
 	void initWidthCtrls(const std::wstring& tool);
 	// 颜色设置（target：theme 主题色，rect / ellipse 该工具的默认色）：

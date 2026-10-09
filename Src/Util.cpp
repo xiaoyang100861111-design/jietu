@@ -287,6 +287,24 @@ void Util::addFileToClipboard(const std::wstring& filePath)
 	CloseClipboard();
 }
 
+bool Util::encodePngBytes(const int w, const int h, BYTE* data, std::vector<BYTE>& out)
+{
+	if (w <= 0 || h <= 0 || !data) return false;
+	ComPtr<IStream> stream;
+	if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, stream.GetAddressOf()))) return false;
+	if (!encodePng(stream.Get(), w, h, data)) return false;
+	HGLOBAL mem{ nullptr };
+	if (FAILED(GetHGlobalFromStream(stream.Get(), &mem)) || !mem) return false;
+	STATSTG stat{};
+	if (FAILED(stream->Stat(&stat, STATFLAG_NONAME))) return false;
+	const auto size = static_cast<size_t>(stat.cbSize.QuadPart);
+	auto ptr = static_cast<const BYTE*>(GlobalLock(mem));
+	if (!ptr) return false;
+	out.assign(ptr, ptr + size);
+	GlobalUnlock(mem);
+	return !out.empty();
+}
+
 bool Util::hasImageReader()
 {
 	return !findImageReader().empty();

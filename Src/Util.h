@@ -11,6 +11,8 @@ public:
 	// 同时写入 CF_DIBV5（Office / 微信 / WPS 这类原生程序认）和 "PNG" 注册格式
 	//（浏览器 / Electron 程序认），两份都带 alpha
 	static void saveToClipboard(const int w, const int h, BYTE* data);
+	// 编码成 PNG 放进内存（上传给在线识别接口用）
+	static bool encodePngBytes(const int w, const int h, BYTE* data, std::vector<BYTE>& out);
 	static bool saveToFile(const std::wstring& path, const int w, const int h, BYTE* data);
 	// 弹系统另存为对话框，返回空串表示用户取消
 	static std::wstring getSaveFilePath(HWND hwnd, const std::wstring& ext = L"png");

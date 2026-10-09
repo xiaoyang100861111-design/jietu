@@ -17,6 +17,7 @@ WinSettingCommon::WinSettingCommon(Ling::WinBase* parent):Ling::Node(parent)
     initDockCtrls();
     initWidthCtrls(L"rect");
     initWidthCtrls(L"ellipse");
+    initEngineCtrls();
     initUpdateCtrls();
     auto weakThis = getWeakThis();
     // 敲色值用的键盘、鼠标订阅。同下面那个回调：先确认自己还活着再碰成员
@@ -197,6 +198,46 @@ void WinSettingCommon::initWidthCtrls(const std::wstring& tool)
     auto border = makeChild<Ling::Node>();
     border->setHeight(1.f);
     border->setBg(0xE0E0E0FF);
+}
+
+// 截图翻译用的两个引擎：文字识别、翻译。都是点一下按钮在两个选项之间切换
+void WinSettingCommon::initEngineCtrls()
+{
+    auto makeRow = [this](const std::wstring& labelKey, const std::wstring& text) {
+        auto box = makeChild<Ling::Node>();
+        box->setHeight(39.f);
+        box->setFlexDirection(Ling::FlexDirection::Row);
+        box->setAlignItems(Ling::Align::Center);
+
+        auto label = box->makeChild<Ling::Label>();
+        label->setText(Lang::get(labelKey));
+        label->setHeightPercent(100.f);
+        label->setJustifyContent(Ling::Justify::Center);
+        label->setFlexGrow(1.f);
+
+        auto btn = box->makeChild<Ling::Button>();
+        btn->setText(text);
+        btn->setHeight(28.f);
+        btn->setWidth(220.f);
+        btn->setBorder(1.f, 0xE0E0E0FF);
+        btn->setHoverBg(0XFFFFFFFF);
+
+        auto border = makeChild<Ling::Node>();
+        border->setHeight(1.f);
+        border->setBg(0xE0E0E0FF);
+        return btn;
+    };
+    auto setting = Setting::get();
+    makeRow(L"setting.ocrEngine", Lang::get(L"setting.ocr_" + setting->getOcrEngine()))->onClick.add([](Ling::Button* btn) {
+        auto next = Setting::get()->getOcrEngine() == L"google" ? L"windows" : L"google";
+        Setting::get()->setOcrEngine(next);
+        btn->setText(Lang::get(std::wstring{ L"setting.ocr_" } + next));
+    });
+    makeRow(L"setting.transEngine", Lang::get(L"setting.trans_" + setting->getTranslateEngine()))->onClick.add([](Ling::Button* btn) {
+        auto next = Setting::get()->getTranslateEngine() == L"google" ? L"microsoft" : L"google";
+        Setting::get()->setTranslateEngine(next);
+        btn->setText(Lang::get(std::wstring{ L"setting.trans_" } + next));
+    });
 }
 
 // 启动时检查更新的开关。升级弹窗里勾了"以后都不检查"关掉的也是它，想恢复来这里打开

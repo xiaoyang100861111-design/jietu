@@ -428,6 +428,42 @@ std::wstring Setting::getTranslateTarget()
     return std::wstring{ obj.GetNamedString(L"target", L"auto") };
 }
 
+std::wstring Setting::getTranslateEngine()
+{
+    auto obj = configObj.GetNamedObject(L"translate", nullptr);
+    if (!obj) return L"google";
+    return obj.GetNamedString(L"engine", L"google") == L"microsoft" ? L"microsoft" : L"google";
+}
+
+void Setting::setTranslateEngine(const std::wstring& val)
+{
+    auto obj = configObj.GetNamedObject(L"translate", nullptr);
+    if (!obj) {
+        obj = JsonObject();
+        configObj.SetNamedValue(L"translate", obj);
+    }
+    obj.SetNamedValue(L"engine", JsonValue::CreateStringValue(val));
+    save();
+}
+
+std::wstring Setting::getOcrEngine()
+{
+    auto obj = configObj.GetNamedObject(L"translate", nullptr);
+    if (!obj) return L"google";
+    return obj.GetNamedString(L"ocr", L"google") == L"windows" ? L"windows" : L"google";
+}
+
+void Setting::setOcrEngine(const std::wstring& val)
+{
+    auto obj = configObj.GetNamedObject(L"translate", nullptr);
+    if (!obj) {
+        obj = JsonObject();
+        configObj.SetNamedValue(L"translate", obj);
+    }
+    obj.SetNamedValue(L"ocr", JsonValue::CreateStringValue(val));
+    save();
+}
+
 void Setting::setLang(const std::wstring& langCode)
 {
     auto common = setting->configObj.GetNamedObject(L"common", nullptr);

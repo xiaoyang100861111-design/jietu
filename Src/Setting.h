@@ -52,6 +52,12 @@ public:
 	// 截图翻译的目标语言（config.json 里的 translate.target，微软翻译的语言代码，如 zh-Hans / en / ja）。
 	// 没配或者配成 auto 就返回 auto：跟着界面语言走，由 Translate 自己换算
 	std::wstring getTranslateTarget();
+	// 翻译用哪家：google（默认）/ microsoft。选的那家不通时会自动换另一家
+	std::wstring getTranslateEngine();
+	void setTranslateEngine(const std::wstring& val);
+	// 文字识别用哪个：google（默认，在线，什么文字都认）/ windows（系统自带，离线，只认装了语言包的）
+	std::wstring getOcrEngine();
+	void setOcrEngine(const std::wstring& val);
 	void setLang(const std::wstring& lang);
 	void initShortcutKeys();
 	// 贴图窗口子工具栏（ToolSub）的状态。每个工具在 config.json 的 toolPin 下各占一组，

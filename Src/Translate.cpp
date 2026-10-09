@@ -16,6 +16,7 @@
 #include "Setting.h"
 #include "Lang.h"
 #include "Log.h"
+#include "Util.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -153,6 +154,270 @@ namespace {
 			}
 		}
 		return stat;
+	}
+
+	// 两种文字各有多少，按一段段的原文统计（Google 识别出来的直接就是段落，没有"行"这一层）
+	CharStat countChars(const std::vector<Translate::Block>& blocks)
+	{
+		CharStat stat;
+		for (auto& block : blocks) {
+			for (auto c : block.src) {
+				if (isHan(c)) stat.han++;
+				else if (isKana(c)) stat.kana++;
+				else if (isHangul(c)) stat.hangul++;
+				else if (isLatin(c)) stat.latin++;
+			}
+		}
+		return stat;
+	}
+
+	// ———— Google 识图（Lens）————
+	// 在线识别，什么文字都认（系统自带的那个只认装了语言包的二十几种）。
+	// 接口是 Chrome 浏览器"用 Google 智能镜头搜索"用的那个，请求和响应都是 protobuf。
+	// 用到的字段就那么几个，手写编解码，不为它拖一个 protobuf 库进来。
+	constexpr std::wstring_view lensUrl{ L"https://lensfrontend-pa.googleapis.com/v1/crupload" };
+	constexpr std::wstring_view lensKey{ L"AIzaSyDr2UxVnv_U85AbhhY8XSHSIavUW0DC-sY" }; //Chrome 内置的公开 key
+
+	void pbVarint(std::vector<BYTE>& out, unsigned long long val)
+	{
+		while (val >= 0x80) {
+			out.push_back(static_cast<BYTE>(val | 0x80));
+			val >>= 7;
+		}
+		out.push_back(static_cast<BYTE>(val));
+	}
+	// 数值字段
+	void pbNum(std::vector<BYTE>& out, int field, unsigned long long val)
+	{
+		pbVarint(out, (unsigned long long)field << 3);
+		pbVarint(out, val);
+	}
+	// 带长度前缀的字段：字符串、字节串、嵌套的消息都是它
+	void pbBytes(std::vector<BYTE>& out, int field, const BYTE* data, size_t size)
+	{
+		pbVarint(out, ((unsigned long long)field << 3) | 2);
+		pbVarint(out, size);
+		out.insert(out.end(), data, data + size);
+	}
+	void pbBytes(std::vector<BYTE>& out, int field, const std::vector<BYTE>& data)
+	{
+		pbBytes(out, field, data.data(), data.size());
+	}
+	void pbStr(std::vector<BYTE>& out, int field, std::string_view str)
+	{
+		pbBytes(out, field, reinterpret_cast<const BYTE*>(str.data()), str.size());
+	}
+
+	// 解码：把一条消息里的字段挨个读出来。嵌套的消息当成一段字节交回去，由调用方再解一层
+	struct PbField {
+		int num{ 0 };
+		int wire{ 0 };              // 0 数值，2 带长度的字节串，5 四字节定长（float）
+		unsigned long long val{ 0 };
+		const BYTE* data{ nullptr };
+		size_t size{ 0 };
+	};
+	bool pbReadVarint(const BYTE*& ptr, const BYTE* end, unsigned long long& val)
+	{
+		val = 0;
+		for (int shift = 0; ptr < end && shift < 64; shift += 7) {
+			const BYTE b = *ptr++;
+			val |= (unsigned long long)(b & 0x7F) << shift;
+			if (!(b & 0x80)) return true;
+		}
+		return false;
+	}
+	std::vector<PbField> pbParse(const BYTE* data, size_t size)
+	{
+		std::vector<PbField> fields;
+		auto ptr = data;
+		const auto end = data + size;
+		while (ptr < end) {
+			unsigned long long key{ 0 };
+			if (!pbReadVarint(ptr, end, key)) break;
+			PbField field;
+			field.num = static_cast<int>(key >> 3);
+			field.wire = static_cast<int>(key & 7);
+			if (field.wire == 0) {
+				if (!pbReadVarint(ptr, end, field.val)) break;
+			}
+			else if (field.wire == 2) {
+				unsigned long long len{ 0 };
+				if (!pbReadVarint(ptr, end, len) || len > static_cast<unsigned long long>(end - ptr)) break;
+				field.data = ptr;
+				field.size = static_cast<size_t>(len);
+				ptr += len;
+			}
+			else if (field.wire == 5 || field.wire == 1) {
+				const size_t len = field.wire == 5 ? 4 : 8;
+				if (static_cast<size_t>(end - ptr) < len) break;
+				field.data = ptr;
+				field.size = len;
+				ptr += len;
+			}
+			else {
+				break; //别的线型这个接口不会出现，碰到了就是数据不对，到此为止
+			}
+			fields.push_back(field);
+		}
+		return fields;
+	}
+	std::vector<PbField> pbParse(const PbField& field)
+	{
+		return field.wire == 2 ? pbParse(field.data, field.size) : std::vector<PbField>{};
+	}
+	std::wstring pbText(const PbField& field)
+	{
+		if (field.wire != 2 || field.size == 0) return L"";
+		const int count = MultiByteToWideChar(CP_UTF8, 0, reinterpret_cast<const char*>(field.data), (int)field.size, nullptr, 0);
+		if (count <= 0) return L"";
+		std::wstring text(count, L'\0');
+		MultiByteToWideChar(CP_UTF8, 0, reinterpret_cast<const char*>(field.data), (int)field.size, text.data(), count);
+		return text;
+	}
+	// Geometry 消息里的包围盒：中心点和宽高，都是相对整张图的比例（0~1）。换成像素矩形。
+	// 旋转角不管 —— 截屏里的字基本都是正的
+	bool pbBox(const PbField& geometry, int w, int h, D2D1_RECT_F& rect)
+	{
+		for (auto& g : pbParse(geometry)) {
+			if (g.num != 1) continue; //bounding_box
+			float vals[5]{};
+			for (auto& f : pbParse(g)) {
+				if (f.wire == 5 && f.num >= 1 && f.num <= 4) memcpy(&vals[f.num], f.data, 4);
+			}
+			const float cx = vals[1] * w, cy = vals[2] * h, bw = vals[3] * w, bh = vals[4] * h;
+			if (bw <= 0.f || bh <= 0.f) return false;
+			rect = D2D1::RectF(cx - bw / 2.f, cy - bh / 2.f, cx + bw / 2.f, cy + bh / 2.f);
+			return true;
+		}
+		return false;
+	}
+
+	// 图太大（超过三百万像素）接口不收，按整数倍缩小。包围盒是按比例给的，缩不缩都对得上
+	std::vector<BYTE> shrink(const std::vector<BYTE>& src, int w, int h, int k, int& dw, int& dh)
+	{
+		dw = (std::max)(1, w / k);
+		dh = (std::max)(1, h / k);
+		std::vector<BYTE> dst((size_t)dw * dh * 4);
+		for (int y = 0; y < dh; y++) {
+			for (int x = 0; x < dw; x++) {
+				unsigned sum[4]{};
+				for (int yy = 0; yy < k; yy++) {
+					auto row = src.data() + ((size_t)(y * k + yy) * w + (size_t)x * k) * 4;
+					for (int xx = 0; xx < k; xx++) {
+						for (int c = 0; c < 4; c++) sum[c] += row[xx * 4 + c];
+					}
+				}
+				auto out = dst.data() + ((size_t)y * dw + x) * 4;
+				for (int c = 0; c < 4; c++) out[c] = static_cast<BYTE>(sum[c] / (k * k));
+			}
+		}
+		return dst;
+	}
+
+	// 返回的直接就是一段段的文字（Google 自己分好了段），坐标是原图的像素
+	std::vector<Translate::Block> recognizeGoogle(int w, int h, const std::vector<BYTE>& pixels)
+	{
+		int k{ 1 };
+		while ((long long)(w / k) * (h / k) > 3000000) k++;
+		int sw{ w }, sh{ h };
+		std::vector<BYTE> small;
+		if (k > 1) small = shrink(pixels, w, h, k, sw, sh);
+		auto& img = k > 1 ? small : pixels;
+		std::vector<BYTE> png;
+		if (!Util::encodePngBytes(sw, sh, const_cast<BYTE*>(img.data()), png)) throw winrt::hresult_error(E_FAIL);
+
+		// 请求体，字段编号照 Chromium 的 lens_overlay 那套 proto 来
+		std::vector<BYTE> requestId, locale, filter, filters, client, context, payload, meta, image, objects, body;
+		GUID guid{};
+		CoCreateGuid(&guid); //只是要 16 个随机字节
+		unsigned long long uuid{ 0 };
+		memcpy(&uuid, &guid, sizeof(uuid));
+		pbNum(requestId, 1, uuid);          //uuid
+		pbNum(requestId, 2, 1);             //sequence_id
+		pbNum(requestId, 3, 1);             //image_sequence_id
+		pbBytes(requestId, 4, reinterpret_cast<const BYTE*>(&guid), sizeof(guid)); //analytics_id
+		pbStr(locale, 1, "zh-CN");          //language
+		pbStr(locale, 2, "CN");             //region
+		pbStr(locale, 3, "");               //time_zone
+		pbNum(filter, 1, 7);                //filter_type = AUTO_FILTER
+		pbBytes(filters, 1, filter);
+		pbNum(client, 1, 3);                //platform = WEB
+		pbNum(client, 2, 4);                //surface = CHROMIUM
+		pbBytes(client, 4, locale);
+		pbBytes(client, 17, filters);
+		pbBytes(context, 3, requestId);
+		pbBytes(context, 4, client);
+		pbBytes(payload, 1, png);           //image_bytes
+		pbNum(meta, 1, sw);
+		pbNum(meta, 2, sh);
+		pbBytes(image, 1, payload);
+		pbBytes(image, 3, meta);
+		pbBytes(objects, 1, context);
+		pbBytes(objects, 3, image);
+		pbBytes(body, 1, objects);
+
+		HttpClient client2;
+		client2.DefaultRequestHeaders().UserAgent().TryParseAdd(
+			L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
+		HttpRequestMessage req{ HttpMethod::Post(), Uri{ lensUrl } };
+		HttpBufferContent content{ CryptographicBuffer::CreateFromByteArray(
+			winrt::array_view<const uint8_t>(body.data(), body.data() + body.size())) };
+		content.Headers().ContentType(Headers::HttpMediaTypeHeaderValue{ L"application/x-protobuf" });
+		req.Content(content);
+		req.Headers().TryAppendWithoutValidation(L"X-Goog-Api-Key", lensKey);
+		auto resp = waitOp(client2.SendRequestAsync(req), 20);
+		resp.EnsureSuccessStatusCode();
+		auto buffer = waitOp(resp.Content().ReadAsBufferAsync(), 20);
+		winrt::com_array<uint8_t> bytes;
+		CryptographicBuffer::CopyToByteArray(buffer, bytes);
+
+		// 响应：objects_response(2) → text(3) → text_layout(1) → paragraphs(1) → lines(2) → words(1)
+		std::vector<Translate::Block> blocks;
+		for (auto& top : pbParse(bytes.data(), bytes.size())) {
+			if (top.num != 2) continue;
+			for (auto& objField : pbParse(top)) {
+				if (objField.num != 3) continue;
+				for (auto& textField : pbParse(objField)) {
+					if (textField.num != 1) continue;
+					for (auto& para : pbParse(textField)) {
+						if (para.num != 1) continue;
+						Translate::Block block;
+						bool hasRect{ false };
+						float lineSum{ 0.f };
+						int lineCount{ 0 };
+						for (auto& pf : pbParse(para)) {
+							if (pf.num == 3 && pf.wire == 2) {
+								hasRect = pbBox(pf, w, h, block.rect);
+							}
+							else if (pf.num == 2 && pf.wire == 2) { //一行
+								std::wstring lineText;
+								for (auto& lf : pbParse(pf)) {
+									if (lf.num == 1 && lf.wire == 2) { //一个词：plain_text(2) + text_separator(3)
+										for (auto& wf : pbParse(lf)) {
+											if ((wf.num == 2 || wf.num == 3) && wf.wire == 2) lineText += pbText(wf);
+										}
+									}
+									else if (lf.num == 2 && lf.wire == 2) {
+										D2D1_RECT_F lineRect{};
+										if (pbBox(lf, w, h, lineRect)) {
+											lineSum += lineRect.bottom - lineRect.top;
+											lineCount++;
+										}
+									}
+								}
+								// 掐掉行尾的空白再接到段落上
+								while (!lineText.empty() && (lineText.back() == L' ' || lineText.back() == L'\n')) lineText.pop_back();
+								appendText(block.src, lineText);
+							}
+						}
+						if (!hasRect || block.src.empty()) continue;
+						block.lineH = lineCount > 0 ? lineSum / lineCount : block.rect.bottom - block.rect.top;
+						blocks.push_back(std::move(block));
+					}
+				}
+			}
+		}
+		return blocks;
 	}
 
 	std::vector<Line> recognize(int w, int h, const std::vector<BYTE>& pixels)
@@ -347,54 +612,84 @@ namespace {
 		for (size_t i = 0; i < blocks.size(); i++) blocks[i].dst = parts[i];
 	}
 
-	void translate(const std::wstring& target, std::vector<Translate::Block>& blocks)
+	// googleFirst：先用哪家。选的那家不通（接口挂了、网络到不了）就自动换另一家
+	void translate(const std::wstring& target, std::vector<Translate::Block>& blocks, bool googleFirst)
 	{
 		HttpClient client;
 		client.DefaultRequestHeaders().UserAgent().TryParseAdd(
 			L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0");
-		try {
-			msTranslate(client, target, blocks);
-			return;
-		}
-		catch (...) {
-			Log::exception(L"translate (microsoft)");
-			// 令牌可能是被服务端提前作废的，清掉，下次重新要
-			std::lock_guard lock{ tokenMutex };
-			msToken.clear();
-		}
-		try {
-			googleTranslate(client, target, blocks);
-		}
-		catch (...) {
-			Log::exception(L"translate (google)");
-			throw WorkError{ L"translate.netError" };
-		}
+		auto tryOne = [&](bool google) {
+			try {
+				if (google) googleTranslate(client, target, blocks);
+				else msTranslate(client, target, blocks);
+				return true;
+			}
+			catch (...) {
+				Log::exception(google ? L"translate (google)" : L"translate (microsoft)");
+				if (!google) {
+					// 令牌可能是被服务端提前作废的，清掉，下次重新要
+					std::lock_guard lock{ tokenMutex };
+					msToken.clear();
+				}
+				return false;
+			}
+		};
+		if (tryOne(googleFirst) || tryOne(!googleFirst)) return;
+		throw WorkError{ L"translate.netError" };
 	}
 
-	void work(int w, int h, const std::vector<BYTE>& pixels, bool needTranslate, const std::wstring& target, Translate::Result& result)
+	// 在 UI 线程上从配置里取好、带到后台线程去用的几个选项
+	struct Options {
+		std::wstring target;        // 目标语言
+		bool googleOcr{ true };     // 文字识别用 Google（否则用系统自带的）
+		bool googleFirst{ true };   // 翻译先用 Google（否则先用微软）
+	};
+
+	void work(int w, int h, const std::vector<BYTE>& pixels, bool needTranslate, const Options& opt, Translate::Result& result)
 	{
-		auto lines = recognize(w, h, pixels);
-		result.blocks = toBlocks(lines);
-		if (result.blocks.empty()) throw WorkError{ L"translate.noText" };
+		// 选了 Google 识别就先试它；没认出字、或者接口不通，退回系统自带的识别
+		bool googleFailed{ false };
+		if (opt.googleOcr) {
+			try {
+				result.blocks = recognizeGoogle(w, h, pixels);
+			}
+			catch (...) {
+				Log::exception(L"ocr (google)");
+				result.blocks.clear();
+				googleFailed = true;
+			}
+		}
+		if (result.blocks.empty()) {
+			try {
+				result.blocks = toBlocks(recognize(w, h, pixels));
+			}
+			catch (const WorkError&) {
+				// 系统自带的也用不了（没装语言包之类）。Google 那边要是连不上，该报的是那个：
+				// 用户选的就是 Google，系统的只是个退路
+				if (!googleFailed) throw;
+			}
+		}
+		// 在线识别没连上，系统自带的又认不出来（多半是它不支持的文字）：把真正的原因告诉用户
+		if (result.blocks.empty()) throw WorkError{ googleFailed ? L"translate.ocrNetError" : L"translate.noText" };
 		for (auto& block : result.blocks) {
 			if (!result.text.empty()) result.text += L"\r\n";
 			result.text += block.src;
 		}
 		if (needTranslate) {
-			translate(pickTarget(target, countChars(lines)), result.blocks);
+			translate(pickTarget(opt.target, countChars(result.blocks)), result.blocks, opt.googleFirst);
 		}
 		result.ok = true;
 	}
 
 	winrt::fire_and_forget run(int w, int h, std::shared_ptr<std::vector<BYTE>> pixels, bool needTranslate,
-		std::wstring target, Translate::Callback cb)
+		Options opt, Translate::Callback cb)
 	{
 		// 识别和网络请求都可能卡上一两秒，挂在 UI 线程上整个应用就不动了
 		co_await winrt::resume_background();
 		auto result = std::make_shared<Translate::Result>();
 		std::wstring errKey;
 		try {
-			work(w, h, *pixels, needTranslate, target, *result);
+			work(w, h, *pixels, needTranslate, opt, *result);
 		}
 		catch (const WorkError& e) {
 			errKey = e.key;
@@ -475,10 +770,14 @@ namespace {
 
 void Translate::start(int w, int h, const std::vector<BYTE>& pixels, bool needTranslate, Callback cb)
 {
-	// 配置对象只在 UI 线程上碰，目标语言在这里先取好
-	auto target = Setting::get()->getTranslateTarget();
-	if (target.empty() || target == L"auto") target = langToTarget(Setting::get()->getLang());
-	run(w, h, std::make_shared<std::vector<BYTE>>(pixels), needTranslate, target, std::move(cb));
+	// 配置对象只在 UI 线程上碰，要用的几项在这里先取好
+	auto setting = Setting::get();
+	Options opt;
+	opt.target = setting->getTranslateTarget();
+	if (opt.target.empty() || opt.target == L"auto") opt.target = langToTarget(setting->getLang());
+	opt.googleOcr = setting->getOcrEngine() == L"google";
+	opt.googleFirst = setting->getTranslateEngine() == L"google";
+	run(w, h, std::make_shared<std::vector<BYTE>>(pixels), needTranslate, opt, std::move(cb));
 }
 
 // 离屏画：底图铺上去，每一段先拿底色把原文盖掉，再把译文写在原来的位置上。
