@@ -37,6 +37,11 @@ public:
 	// 话术页上次选中的分组（完整路径），下次打开还停在那儿
 	std::wstring getPhrasePath();
 	void setPhrasePath(const std::wstring& path);
+	// 启动时要不要检查更新（默认查），以及用户点了"忽略这个版本"的那个版本号
+	bool getUpdateEnabled();
+	void setUpdateEnabled(bool val);
+	std::wstring getUpdateIgnore();
+	void setUpdateIgnore(const std::wstring& version);
 	int getDockEdge();
 	void setDockEdge(int val);
 	int getMouseTrigger();

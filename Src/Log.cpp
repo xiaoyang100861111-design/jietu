@@ -6,6 +6,7 @@
 #include <mutex>
 #include "Log.h"
 #include "Setting.h"
+#include "Update.h"
 
 namespace {
 	std::mutex logMutex;
@@ -111,7 +112,7 @@ void Log::init()
 	auto rtlGetVersion = reinterpret_cast<LONG(WINAPI*)(OSVERSIONINFOW*)>(
 		GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion"));
 	if (rtlGetVersion) rtlGetVersion(&os);
-	write(std::format(L"START version={}.{}.{} built={} {} windows={}.{}.{}", ver[0], ver[1], ver[2],
+	write(std::format(L"START version={} file={}.{}.{} built={} {} windows={}.{}.{}", Update::version(), ver[0], ver[1], ver[2],
 		Ling::Util::convertToWStr(__DATE__), Ling::Util::convertToWStr(__TIME__),
 		os.dwMajorVersion, os.dwMinorVersion, os.dwBuildNumber));
 }

@@ -17,6 +17,7 @@ WinSettingCommon::WinSettingCommon(Ling::WinBase* parent):Ling::Node(parent)
     initDockCtrls();
     initWidthCtrls(L"rect");
     initWidthCtrls(L"ellipse");
+    initUpdateCtrls();
     auto weakThis = getWeakThis();
     // 敲色值用的键盘、鼠标订阅。同下面那个回调：先确认自己还活着再碰成员
     hexCharToken = win->onChar.add([this, weakThis](UINT code) {
@@ -192,6 +193,42 @@ void WinSettingCommon::initWidthCtrls(const std::wstring& tool)
     };
     minus->onClick.add([step](Ling::Button*) { step(-1); });
     plus->onClick.add([step](Ling::Button*) { step(1); });
+
+    auto border = makeChild<Ling::Node>();
+    border->setHeight(1.f);
+    border->setBg(0xE0E0E0FF);
+}
+
+// 启动时检查更新的开关。升级弹窗里勾了"以后都不检查"关掉的也是它，想恢复来这里打开
+void WinSettingCommon::initUpdateCtrls()
+{
+    auto box = makeChild<Ling::Node>();
+    box->setHeight(39.f);
+    box->setFlexDirection(Ling::FlexDirection::Row);
+    box->setAlignItems(Ling::Align::Center);
+
+    auto label = box->makeChild<Ling::Label>();
+    label->setText(Lang::get(L"setting.updateCheck"));
+    label->setHeightPercent(100.f);
+    label->setJustifyContent(Ling::Justify::Center);
+    label->setFlexGrow(1.f);
+
+    auto apply = [](Ling::Button* btn) {
+        const bool on = Setting::get()->getUpdateEnabled();
+        btn->setText(on ? L"\ue688" : L"\ue687");
+        btn->setColor(on ? 0x597ef7ff : 0x666666FF);
+        btn->setHoverColor(on ? 0x597ef7ff : 0x666666FF);
+    };
+    auto btn = box->makeChild<Ling::Button>();
+    btn->setFontFamily(L"icon");
+    btn->setHeightPercent(100.f);
+    btn->setFontSize(18.f);
+    btn->setWidth(60.f);
+    apply(btn);
+    btn->onClick.add([apply](Ling::Button* btn) {
+        Setting::get()->setUpdateEnabled(!Setting::get()->getUpdateEnabled());
+        apply(btn);
+    });
 
     auto border = makeChild<Ling::Node>();
     border->setHeight(1.f);

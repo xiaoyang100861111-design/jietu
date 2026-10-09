@@ -271,6 +271,35 @@ void Setting::setPhrasePath(const std::wstring& path)
     save();
 }
 
+bool Setting::getUpdateEnabled()
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    return !common || common.GetNamedBoolean(L"updateCheck", true);
+}
+
+void Setting::setUpdateEnabled(bool val)
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) return;
+    common.SetNamedValue(L"updateCheck", JsonValue::CreateBooleanValue(val));
+    save();
+}
+
+std::wstring Setting::getUpdateIgnore()
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) return L"";
+    return std::wstring{ common.GetNamedString(L"updateIgnore", L"") };
+}
+
+void Setting::setUpdateIgnore(const std::wstring& version)
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) return;
+    common.SetNamedValue(L"updateIgnore", JsonValue::CreateStringValue(version));
+    save();
+}
+
 int Setting::getDockEdge()
 {
     auto common = configObj.GetNamedObject(L"common", nullptr);

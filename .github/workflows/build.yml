@@ -45,6 +45,16 @@ jobs:
           RUSTFLAGS: -C target-feature=+crt-static
         run: cargo build --release --lib
 
+      # 版本号 = 编译时间（北京时间）。写进 BuildInfo.h 编进 exe，后面发布 version.json 时用的也是它
+      - name: Stamp version
+        shell: pwsh
+        run: |
+          $now = [TimeZoneInfo]::ConvertTimeBySystemTimeZoneId([DateTime]::UtcNow, 'China Standard Time')
+          $ver = $now.ToString('yyyy.MM.dd.HHmm')
+          "BUILD_VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Set-Content -Path Src\BuildInfo.h -Encoding utf8 -Value "#pragma once`n#define BUILD_VERSION L`"$ver`"`n"
+          Get-Content Src\BuildInfo.h
+
       - uses: microsoft/setup-msbuild@v2
 
       - name: Build
@@ -115,13 +125,21 @@ jobs:
           $dir = Join-Path $env:RUNNER_TEMP 'dist'
           New-Item -ItemType Directory -Force $dir | Out-Null
           Copy-Item "x64\Release\ScreenCapture.exe" (Join-Path $dir 'UU截图.exe')
+          # version.json：程序启动时来这里看有没有新版本。notes 是这一版的更新说明（Doc/update-notes.txt）
+          $notes = (Get-Content Doc\update-notes.txt -Raw -Encoding utf8).Trim()
+          $info = [ordered]@{
+            version = $env:BUILD_VERSION
+            notes = $notes
+            url = "https://raw.githubusercontent.com/${{ github.repository }}/dist/UU%E6%88%AA%E5%9B%BE.exe"
+          }
+          $info | ConvertTo-Json | Set-Content -Path (Join-Path $dir 'version.json') -Encoding utf8
           Set-Location $dir
           git init -q -b dist
           git config user.name 'github-actions'
           git config user.email 'actions@users.noreply.github.com'
           git config core.quotepath false
           git add -A
-          git commit -q -m "build ${{ github.run_number }}"
+          git commit -q -m "build ${{ github.run_number }} ($env:BUILD_VERSION)"
           git push -f "https://x-access-token:$($env:GH_TOKEN)@github.com/${{ github.repository }}.git" dist
           if ($LASTEXITCODE) { Write-Host 'push to dist failed'; exit 0 }
 
@@ -129,8 +147,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: UU截图 build ${{ github.run_number }}
-          body: UU截图：截图标注、截图翻译、剪切板历史。下载 exe 直接运行即可。
+          name: UU截图 ${{ env.BUILD_VERSION }} (build ${{ github.run_number }})
+          body_path: Doc/update-notes.txt
           files: |
             x64/Release/UUjietu.exe
             x64/Release/UUjietu.map

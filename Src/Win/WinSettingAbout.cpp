@@ -3,10 +3,11 @@
 #include "WinSetting.h"
 #include "WinSettingAbout.h"
 #include "../Util.h"
+#include "../Update.h"
 
 WinSettingAbout::WinSettingAbout(Ling::WinBase* parent):Ling::Node(parent)
 {
-    std::vector<std::wstring> keys = { L"version",L"project" };
+    std::vector<std::wstring> keys = { L"version",L"project",L"update" };
     for (auto& key : keys)
     {
         auto box = makeChild<Ling::Node>();
@@ -23,16 +24,21 @@ WinSettingAbout::WinSettingAbout(Ling::WinBase* parent):Ling::Node(parent)
         auto btn = box->makeChild<Ling::Button>();
         btn->setId(key);
         if (key == L"version") {
-            auto ver = Ling::Util::getVerNum();
-            auto verStr = std::format(L"{}.{}.{}", ver[0], ver[1], ver[2]);
-            btn->setText(verStr);
+            // 版本号就是这一版的编译时间
+            btn->setText(Update::version());
         }
         else if (key == L"project") {
             btn->setText(L"UU截图");
         }
+        else {
+            btn->setText(Lang::get(L"about.checkUpdate"));
+            btn->setColor(0x597ef7ff);
+            btn->setHoverColor(0x597ef7ff);
+            btn->onClick.add([](Ling::Button*) { Update::checkNow(); });
+        }
         btn->setAlignItems(Ling::Align::FlexEnd);
         btn->setHeight(28.f);
-        btn->setWidth(120.f);
+        btn->setWidth(160.f);
         btn->setBg(0);
         btn->setHoverBg(0);
         btns.push_back(btn);
