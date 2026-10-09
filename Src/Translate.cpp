@@ -320,9 +320,9 @@ namespace {
 		int k{ 1 };
 		while ((long long)(w / k) * (h / k) > 3000000) k++;
 		int sw{ w }, sh{ h };
-		std::vector<BYTE> small;
-		if (k > 1) small = shrink(pixels, w, h, k, sw, sh);
-		auto& img = k > 1 ? small : pixels;
+		std::vector<BYTE> reduced; //别叫 small：那是 Windows 头文件里的一个宏
+		if (k > 1) reduced = shrink(pixels, w, h, k, sw, sh);
+		auto& img = k > 1 ? reduced : pixels;
 		std::vector<BYTE> png;
 		if (!Util::encodePngBytes(sw, sh, const_cast<BYTE*>(img.data()), png)) throw winrt::hresult_error(E_FAIL);
 
