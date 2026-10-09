@@ -14,9 +14,12 @@ private:
 	void onCreated() override;
 	void onMenuItemClick(Ling::Button* menu);
 	LRESULT onHitTest(const POINT pos) override;
+	// 顶上那条状态栏右边的字：有没有新版本。查到结果后刷新
+	void refreshUpdateBtn();
 private:
 	std::vector<Ling::Button*> menus;
 	int menuIndex{ 0 };
 	Ling::Node* content{nullptr};
+	Ling::Button* updateBtn{ nullptr };
 };
 

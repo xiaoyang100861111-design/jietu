@@ -4,6 +4,7 @@
 #include "../Lang.h"
 #include "WinSetting.h"
 #include "../Setting.h"
+#include "../Update.h"
 #include "WinSettingCommon.h"
 #include "WinSettingShortcut.h"
 #include "WinSettingAbout.h"
@@ -18,6 +19,7 @@ WinSetting::WinSetting() :Ling::WinBase()
 	// 不放掉的话这个对象会一直活着，Ling 那边就永远看不到"一个窗口都不剩"，D2D 设备
 	// 也就永远还不回去
 	onDestroy.add([]() {
+		Update::onStateChanged = nullptr;
 		Ling::App::get()->dq.TryEnqueue([]() { winSetting.reset(); });
 	});
 	setTitle(Lang::get(L"setting.title"));
@@ -73,6 +75,39 @@ void WinSetting::onCreated()
 	content->setPaddingTop(40.f);
 	content->setPadding(20.f, 40.f, 20.f, 40.f);
 	content->setFlexDirection(Ling::FlexDirection::Column);
+
+	// 顶上一条浅灰色的状态栏（菜单右边那一段）：左边版本号，右边有没有新版本，点一下去更新。
+	// 绝对定位，盖在内容区顶部留出来的那 40 像素上；关闭按钮建在它后面，所以叠在它上面
+	auto header = body->makeChild<Ling::Node>();
+	header->setPositionType(Ling::Position::Absolute);
+	header->setPosition(Ling::Edge::Left, 160.f);
+	header->setPosition(Ling::Edge::Top, 0.f);
+	header->setPosition(Ling::Edge::Right, 0.f);
+	header->setHeight(32.f);
+	header->setBg(0xEEEEF0FF);
+	header->setFlexDirection(Ling::FlexDirection::Row);
+	header->setAlignItems(Ling::Align::Center);
+	auto verLabel = header->makeChild<Ling::Label>();
+	verLabel->setText(std::format(L"UU截图   {} {}", Lang::get(L"about.version"), Update::version()));
+	verLabel->setHeightPercent(100.f);
+	verLabel->setJustifyContent(Ling::Justify::Center);
+	verLabel->setFlexGrow(1.f);
+	verLabel->setMarginLeft(20.f);
+	verLabel->setColor(0x666666FF);
+	updateBtn = header->makeChild<Ling::Button>();
+	updateBtn->setHeight(26.f);
+	updateBtn->setWidth(260.f);
+	updateBtn->setMarginRight(50.f); //给右上角的关闭按钮让位
+	updateBtn->setAlignItems(Ling::Align::FlexEnd);
+	updateBtn->setBg(0);
+	updateBtn->setHoverBg(0);
+	// 点它 = 手动检查：有新版弹升级窗口，没有就说一声已是最新
+	updateBtn->onClick.add([](Ling::Button*) { Update::checkNow(); });
+	refreshUpdateBtn();
+	Update::onStateChanged = []() {
+		if (winSetting) winSetting->refreshUpdateBtn();
+	};
+	Update::checkQuiet(); //打开设置时悄悄查一次，结果回来会刷新上面那行字
 
 	auto closeBtn = body->makeChild<Ling::Button>();
 	closeBtn->setSize(42.f, 32.f);
@@ -158,10 +193,27 @@ void WinSetting::onMenuItemClick(Ling::Button* menuItem)
 	content->setFlexDirection(Ling::FlexDirection::Column);
 }
 
+void WinSetting::refreshUpdateBtn()
+{
+	if (!updateBtn) return;
+	const int state = Update::state();
+	std::wstring text = state == 2 ? std::format(L"{} {}  {}", Lang::get(L"update.found"), Update::latestVersion(), Lang::get(L"update.clickToUpdate"))
+		: state == 1 ? Lang::get(L"update.latest")
+		: state == 3 ? Lang::get(L"update.checkRetry")
+		: Lang::get(L"update.checking");
+	// 有新版本用红色，够显眼；其余是不起眼的灰色
+	const uint32_t color = state == 2 ? 0xE64340FF : 0x888888FF;
+	updateBtn->setText(text);
+	updateBtn->setColor(color);
+	updateBtn->setHoverColor(state == 2 ? 0xC0392BFF : 0x555555FF);
+}
+
 LRESULT WinSetting::onHitTest(const POINT pos)
 {
 	POINT pt = pos;
 	ScreenToClient(hwnd, &pt);
+	// 状态栏右边那行字是要能点的，别被下面"顶上一条当标题栏"的规则吃掉
+	if (updateBtn && updateBtn->isPosIn(pt)) return HTCLIENT;
 	if (!isMaximized) {
 		auto result = borderHitTest(pt);
 		if (result != HTCLIENT) return result;

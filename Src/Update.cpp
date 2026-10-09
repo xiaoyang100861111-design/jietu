@@ -35,6 +35,11 @@ namespace {
 	};
 
 	bool busy{ false };          //正在查 / 正在下载，别重复起
+	// 查的方式：启动时自动查（忽略过的版本不提示）、用户手动点的（有没有新版都说一声）、
+	// 只想知道结果的（什么窗口都不弹）
+	enum class Mode { Auto, Manual, Quiet };
+	int lastState{ 0 };          //见 Update::state()
+	std::wstring lastVersion;
 	UINT_PTR startTimer{ 0 };
 
 	std::filesystem::path selfPath()
@@ -212,18 +217,24 @@ namespace {
 	}
 
 	// UI 线程上：拿到服务端的版本信息之后
-	void onChecked(bool ok, const Info& info, bool manual)
+	void onChecked(bool ok, const Info& info, Mode mode)
 	{
 		busy = false;
 		auto setting = Setting::get();
 		if (!setting) return;
+		const bool manual = mode == Mode::Manual;
 		const auto cur = Update::version();
+		// 版本号是等长的"年.月.日.时分"，按字符串比就是按时间比。自己编的（dev）不参与
+		const bool hasNew = ok && cur != L"dev" && info.version > cur;
+		lastState = !ok ? 3 : hasNew ? 2 : 1;
+		lastVersion = hasNew ? info.version : L"";
+		if (Update::onStateChanged) Update::onStateChanged();
+		if (mode == Mode::Quiet) return;
 		if (!ok) {
 			if (manual) tip(Lang::get(L"update.checkFailed"), MB_ICONWARNING);
 			return;
 		}
-		// 版本号是等长的"年.月.日.时分"，按字符串比就是按时间比。自己编的（dev）不参与
-		if (cur == L"dev" || info.version <= cur) {
+		if (!hasNew) {
 			if (manual) tip(std::format(L"{}\n\n{} {}", Lang::get(L"update.latest"), Lang::get(L"update.current"), cur));
 			return;
 		}
@@ -247,7 +258,7 @@ namespace {
 		}
 	}
 
-	winrt::fire_and_forget check(bool manual)
+	winrt::fire_and_forget check(Mode mode)
 	{
 		// 网络请求挪到后台线程：可能卡好几秒，挂在 UI 线程上整个应用就不动了
 		co_await winrt::resume_background();
@@ -271,7 +282,7 @@ namespace {
 				Log::exception(L"update check");
 			}
 		}
-		Ling::App::get()->dq.TryEnqueue([ok, info, manual]() { onChecked(ok, info, manual); });
+		Ling::App::get()->dq.TryEnqueue([ok, info, mode]() { onChecked(ok, info, mode); });
 	}
 
 	void CALLBACK onStartTimer(HWND, UINT, UINT_PTR id, DWORD)
@@ -280,7 +291,7 @@ namespace {
 		startTimer = 0;
 		if (busy) return;
 		busy = true;
-		check(false);
+		check(Mode::Auto);
 	}
 }
 
@@ -302,8 +313,27 @@ void Update::checkNow()
 {
 	if (busy) return;
 	busy = true;
-	check(true);
+	check(Mode::Manual);
 }
+
+void Update::checkQuiet()
+{
+	if (busy) return;
+	busy = true;
+	check(Mode::Quiet);
+}
+
+int Update::state()
+{
+	return lastState;
+}
+
+std::wstring Update::latestVersion()
+{
+	return lastVersion;
+}
+
+std::function<void()> Update::onStateChanged;
 
 void Update::checkLater()
 {

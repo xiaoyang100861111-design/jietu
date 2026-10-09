@@ -1,6 +1,7 @@
 #pragma once
 #include <include/Ling.h>
 #include <string>
+#include <functional>
 
 // 升级。
 // 版本号就是编译时间（见 BuildInfo.h），服务端是 GitHub 仓库的 dist 分支：
@@ -18,6 +19,14 @@ public:
 	static void checkOnStart();
 	// "关于"页上的"检查更新"按钮：马上查，没有新版也会告诉用户一声，忽略过的版本也照样提示
 	static void checkNow();
+	// 不弹任何窗口地查一次，只更新下面的 state()。设置窗口顶上那条状态栏用
+	static void checkQuiet();
+	// 最近一次查到的结果：0 还不知道（没查过 / 正在查），1 已经是最新，2 有新版本，3 没查成（网络不通）
+	static int state();
+	// state() 为 2 时，那个新版本的版本号
+	static std::wstring latestVersion();
+	// 查完（不管是哪种方式触发的）就调一下，UI 线程。设置窗口靠它刷新状态栏
+	static std::function<void()> onStateChanged;
 	// 老接口，原来是"回到空闲状态时顺便查一下"，现在不用了，留着是因为好几处还在调
 	static void checkLater();
 };
