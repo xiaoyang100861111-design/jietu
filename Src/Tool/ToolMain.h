@@ -28,8 +28,8 @@ private:
 	// 逻辑像素，交给 Ling 的 setter 时由其内部乘 dpi
 	static constexpr float btnSize{ 32.f };
 	static constexpr float spliterW{ 1.f };
-	std::vector<std::wstring> btnIds = { L"rect",L"ellipse",L"arrow",L"number",L"line",L"text",L"mosaic", L"eraser",L"|",L"ocr",L"translate",L"|",L"undo",L"redo",L"|",L"close",L"save",L"clipboard" };
-	std::vector<std::wstring> btnCodes = { L"\ue8e8",L"\ue6bc",L"\ue603",L"\ue776",L"\ue601",L"\ue6ec",L"\ue82e",L"\ue6be",L"|",L"\ue67b",L"译",L"|",L"\ued85",L"\ued8a",L"|",L"\ue62d",L"\ue608",L"\ue6ad" };
+	std::vector<std::wstring> btnIds = { L"rect",L"ellipse",L"arrow",L"number",L"line",L"text",L"mosaic", L"eraser",L"|",L"ocr",L"translate",L"video",L"|",L"undo",L"redo",L"|",L"close",L"save",L"clipboard" };
+	std::vector<std::wstring> btnCodes = { L"\ue8e8",L"\ue6bc",L"\ue603",L"\ue776",L"\ue601",L"\ue6ec",L"\ue82e",L"\ue6be",L"|",L"\ue67b",L"译",L"\ue660",L"|",L"\ued85",L"\ued8a",L"|",L"\ue62d",L"\ue608",L"\ue6ad" };
 	std::vector<Ling::Button*> btns;
 	// 悬停提示。要 hwnd，所以在 onCreated 里才建得起来
 	std::unique_ptr<Tip> tip;

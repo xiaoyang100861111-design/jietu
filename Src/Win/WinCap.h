@@ -14,6 +14,8 @@ public:
 	~WinCap();
 	// translate 为 true：框完选区不出工具条，直接翻译（"截图翻译"快捷键走这条路）
 	static void init(bool translate = false);
+	// 不经过框选，直接对屏幕上这块区域（屏幕坐标）进入录屏阶段。贴图窗口上的"录屏"按钮走这条路
+	static void initRecord(int sx, int sy, int sw, int sh);
 	static WinCap* get();
 	// 退出流程里调：窗口对象是文件级静态变量，交给静态析构就在 CoUninitialize 之后了
 	static void dispose();
@@ -103,6 +105,9 @@ private:
 	// 文字识别 / 翻译正在后台跑。这期间不让再动选区，光标显示成等待
 	bool textWorking{ false };
 	bool autoTranslate{ false };
+	// initRecord 给的录制区域（屏幕坐标）。有它就跳过框选
+	bool hasRecordRect{ false };
+	RECT recordRect{};
 	// 这一次后台任务的编号。结果回来时窗口可能已经关掉又重开了一个，对不上号就丢弃
 	unsigned textWorkId{ 0 };
 	// onDpiChanged 与 onSizeChanged 之间的接力标记，见构造函数里的注释

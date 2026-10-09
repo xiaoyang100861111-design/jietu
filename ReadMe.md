@@ -33,7 +33,11 @@
 - **剪切板历史**：自动记录复制过的文本、图片、文件（最多 300 条，收藏的不限）。按 `Ctrl+Alt+V`（可改）或托盘菜单打开面板：直接打字搜索，点一条（或上下键 + 回车）粘贴到原来的窗口，右键只复制不粘贴，☆ 收藏，✕ 删除。记录存在 `%appdata%\ScreenCapture\clip`，可以在通用设置里关掉。
 - 本分支关闭了自动升级（否则会被升回不带翻译的官方版本）。
 
-## 下载
+## 下载（本分支）
+
+最新版，下载下来文件名就是 `UU截图.exe`：<https://github.com/xiaoyang100861111-design/jietu/raw/dist/UU%E6%88%AA%E5%9B%BE.exe>
+
+## 下载（上游原版）
 
 [Release](https://github.com/xland/ScreenCapture/releases/) （1MB）
 

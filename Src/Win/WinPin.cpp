@@ -105,7 +105,7 @@ void WinPin::onClosed()
 		std::erase_if(winPins, [this](const std::unique_ptr<WinPin>& p) { return p.get() == this; });
 		// 用完即走模式下，最后一个贴图窗口关掉就退出进程，不驻留在系统里。
 		// 贴图可以同时开好几个（标注、长截图各来一张），所以得等它们都没了才退
-		if (winPins.empty()) {
+		if (winPins.empty() && !WinCap::get()) {
 			if (Ling::App::get()->args[L"--auto-quit"] == L"true") {
 				Ling::App::get()->quit(0);
 			}
@@ -547,6 +547,16 @@ void WinPin::copyToClipboard()
 	if (!getImagePixels(pixels, size)) return;
 	Util::saveToClipboard((int)size.width, (int)size.height, pixels.data());
 	close();
+}
+
+void WinPin::startRecord()
+{
+	RECT rect{};
+	if (!GetWindowRect(hwnd, &rect)) return;
+	// 先把录屏的建起来再关自己：用完即走模式下最后一个贴图窗口关掉会退进程，
+	// 得让它看到"截图窗口还开着"
+	WinCap::initRecord(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top);
+	if (WinCap::get()) close();
 }
 
 void WinPin::startTextWork(bool translate)

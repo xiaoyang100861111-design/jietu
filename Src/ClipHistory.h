@@ -55,7 +55,13 @@ public:
 	// 把一条历史记录抄进话术
 	bool addPhraseFromItem(long long historyId, const std::wstring& group);
 	// 把系统剪切板里现在的内容存成一条话术
-	bool addPhraseFromClipboard(const std::wstring& group);
+	bool addPhraseFromClipboard(const std::wstring& group, const std::wstring& title = L"");
+	// 直接存一段文字
+	bool addPhraseText(const std::wstring& group, const std::wstring& title, const std::wstring& text);
+	// 改一条话术的备注名和文字（图片 / 文件类的只改备注名，text 不管）
+	void updatePhrase(long long id, const std::wstring& title, const std::wstring& text);
+	// 只看一眼系统剪切板里现在是什么（类型、图片尺寸、文件路径），不保存
+	bool peekClipboard(Item& item);
 	void removePhrase(long long id);
 	void setPhraseTitle(long long id, const std::wstring& title);
 	// 换分组。group 为空 = 放回未分组

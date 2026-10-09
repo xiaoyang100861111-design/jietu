@@ -64,6 +64,17 @@ void WinCap::init(bool translate)
     ptr->createNativeWindow(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, WS_POPUP);//WS_EX_TOPMOST
 }
 
+void WinCap::initRecord(int sx, int sy, int sw, int sh)
+{
+    if (winCap || sw <= 0 || sh <= 0) return;
+    auto ptr = new WinCap();
+    winCap.reset(ptr);
+    ptr->hasRecordRect = true;
+    ptr->recordRect = RECT{ sx, sy, sx + sw, sy + sh };
+    ptr->cutMask = std::make_unique<CutMask>(ptr);
+    ptr->createNativeWindow(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, WS_POPUP);
+}
+
 WinCap* WinCap::get()
 {
     return winCap.get();
@@ -91,6 +102,13 @@ void WinCap::onCreated()
     getPixImg(pos);
     setPixPos(pos);
     show();
+    if (hasRecordRect) {
+        // 选区直接用给定的那块（换成本窗口的客户区坐标），然后等于替用户点了"录屏"
+        cutMask->maskRect = D2D1::RectF((float)(recordRect.left - x), (float)(recordRect.top - y),
+            (float)(recordRect.right - x), (float)(recordRect.bottom - y));
+        stage = CapStage::Adjust;
+        startVideo();
+    }
 }
 
 void WinCap::layout()

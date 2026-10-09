@@ -33,6 +33,47 @@ namespace {
 			std::chrono::system_clock::now().time_since_epoch()).count();
 	}
 
+	// 去重用的"规整后的文本"：换行统一成 \n，掐掉两头的空白。
+	// 同一段话从不同程序里复制出来，常常只差一个结尾换行或者 \r\n / \n，那不该算两条
+	std::wstring normText(const std::wstring& text)
+	{
+		std::wstring result;
+		result.reserve(text.size());
+		for (auto c : text) {
+			if (c != L'\r') result += c;
+		}
+		const auto from = result.find_first_not_of(L" \t\n");
+		if (from == std::wstring::npos) return L"";
+		const auto to = result.find_last_not_of(L" \t\n");
+		return result.substr(from, to - from + 1);
+	}
+
+	// 图片的去重指纹：解码成像素再算，alpha 一律按不透明。
+	// 同一张图从 PNG 格式拿和从位图格式拿、或者被不同程序重新编码过，字节不一样但像素一样
+	unsigned long long hashPng(const std::vector<BYTE>& png)
+	{
+		ComPtr<IWICImagingFactory> factory;
+		ComPtr<IWICStream> stream;
+		ComPtr<IWICBitmapDecoder> decoder;
+		ComPtr<IWICBitmapFrameDecode> frame;
+		ComPtr<IWICFormatConverter> converter;
+		UINT w{ 0 }, h{ 0 };
+		if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(factory.GetAddressOf())))
+			|| FAILED(factory->CreateStream(stream.GetAddressOf()))
+			|| FAILED(stream->InitializeFromMemory(const_cast<BYTE*>(png.data()), (DWORD)png.size()))
+			|| FAILED(factory->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnDemand, decoder.GetAddressOf()))
+			|| FAILED(decoder->GetFrame(0, frame.GetAddressOf()))
+			|| FAILED(frame->GetSize(&w, &h)) || w == 0 || h == 0 || (long long)w * h > maxImgPixels
+			|| FAILED(factory->CreateFormatConverter(converter.GetAddressOf()))
+			|| FAILED(converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0., WICBitmapPaletteTypeCustom))) {
+			return fnv(png.data(), png.size()); //解不出来就退回按字节算
+		}
+		std::vector<BYTE> pixels((size_t)w * h * 4);
+		if (FAILED(converter->CopyPixels(nullptr, w * 4, (UINT)pixels.size(), pixels.data()))) return fnv(png.data(), png.size());
+		for (size_t i = 3; i < pixels.size(); i += 4) pixels[i] = 255;
+		return fnv(pixels.data(), pixels.size());
+	}
+
 	bool readFiles(ClipHistory::Item& item)
 	{
 		if (!IsClipboardFormatAvailable(CF_HDROP)) return false;
@@ -69,7 +110,8 @@ namespace {
 		if (text.find_first_not_of(L" \t\r\n") == std::wstring::npos) return false;
 		item.type = ClipHistory::Type::Text;
 		item.text = std::move(text);
-		item.hash = fnv(item.text.data(), item.text.size() * sizeof(wchar_t));
+		auto norm = normText(item.text);
+		item.hash = fnv(norm.data(), norm.size() * sizeof(wchar_t));
 		return true;
 	}
 
@@ -95,7 +137,7 @@ namespace {
 					item.type = ClipHistory::Type::Image;
 					item.imgW = w;
 					item.imgH = h;
-					item.hash = fnv(pngBytes.data(), pngBytes.size());
+					item.hash = hashPng(pngBytes);
 					return true;
 				}
 				pngBytes.clear();
@@ -310,7 +352,8 @@ void ClipHistory::add(std::shared_ptr<Item> item, const std::vector<BYTE>& pngBy
 	for (size_t i = 0; i < items.size(); i++) {
 		auto& old = items[i];
 		if (old->type != item->type || old->hash != item->hash) continue;
-		if (old->type != Type::Image && old->text != item->text) continue;
+		if (old->type == Type::Text && normText(old->text) != normText(item->text)) continue;
+		if (old->type == Type::Files && old->text != item->text) continue;
 		auto keep = old;
 		items.erase(items.begin() + i);
 		items.insert(items.begin(), keep);
@@ -648,7 +691,44 @@ bool ClipHistory::addPhraseFromItem(long long historyId, const std::wstring& gro
 	return false;
 }
 
-bool ClipHistory::addPhraseFromClipboard(const std::wstring& group)
+bool ClipHistory::peekClipboard(Item& item)
+{
+	if (!OpenClipboard(hwnd)) return false;
+	std::vector<BYTE> pngBytes, pixels;
+	int w{ 0 }, h{ 0 };
+	const bool ok = readClipboard(item, pngBytes, w, h, pixels);
+	CloseClipboard();
+	return ok;
+}
+
+bool ClipHistory::addPhraseText(const std::wstring& group, const std::wstring& title, const std::wstring& text)
+{
+	if (text.find_first_not_of(L" \t\r\n") == std::wstring::npos) return false;
+	auto phrase = std::make_shared<Item>();
+	phrase->id = newId();
+	phrase->type = Type::Text;
+	phrase->text = text;
+	phrase->title = title;
+	phrase->group = group;
+	phrases.insert(phrases.begin(), phrase);
+	savePhrases();
+	notify();
+	return true;
+}
+
+void ClipHistory::updatePhrase(long long id, const std::wstring& title, const std::wstring& text)
+{
+	for (auto& phrase : phrases) {
+		if (phrase->id != id) continue;
+		phrase->title = title;
+		if (phrase->type == Type::Text && text.find_first_not_of(L" \t\r\n") != std::wstring::npos) phrase->text = text;
+		savePhrases();
+		notify();
+		return;
+	}
+}
+
+bool ClipHistory::addPhraseFromClipboard(const std::wstring& group, const std::wstring& title)
 {
 	if (!OpenClipboard(hwnd)) return false;
 	auto phrase = std::make_shared<Item>();
@@ -659,6 +739,7 @@ bool ClipHistory::addPhraseFromClipboard(const std::wstring& group)
 	if (!ok) return false;
 	phrase->id = newId();
 	phrase->group = group;
+	phrase->title = title;
 	if (phrase->type == Type::Image && !saveImage(phrase->id, pngBytes, w, h, pixels)) return false;
 	phrases.insert(phrases.begin(), phrase);
 	savePhrases();

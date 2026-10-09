@@ -29,6 +29,9 @@ public:
 	// 翻译成功就把底图换成盖了译文的那张，已经画上去的 shape 原样留在上面；
 	// 文字识别则弹框显示认出来的文字
 	void startTextWork(bool translate);
+	// 录屏（ToolMain 上的按钮）：录的就是这个贴图窗口现在占着的那块屏幕。
+	// 贴图窗口自己关掉，换成截图窗口的录屏阶段接手
+	void startRecord();
 	// 所有 ShapeText 共用的文本输入框，第一次用到时才建。
 	// 共用而不是一个 shape 一个：TextBox 构造时会往窗口的十来个事件上挂回调，
 	// N 个实例意味着每次鼠标移动都要跑 N 遍，而同一时刻只可能有一个 ShapeText 在编辑。

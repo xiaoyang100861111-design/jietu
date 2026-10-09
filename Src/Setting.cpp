@@ -224,6 +224,53 @@ void Setting::setClipSize(float w, float h)
     save();
 }
 
+bool Setting::getClipPinned()
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    return common && common.GetNamedBoolean(L"clipPinned", false);
+}
+
+void Setting::setClipPinned(bool val)
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) return;
+    common.SetNamedValue(L"clipPinned", JsonValue::CreateBooleanValue(val));
+    save();
+}
+
+bool Setting::getClipPos(int& x, int& y)
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common || !common.HasKey(L"clipX") || !common.HasKey(L"clipY")) return false;
+    x = static_cast<int>(common.GetNamedNumber(L"clipX", 0));
+    y = static_cast<int>(common.GetNamedNumber(L"clipY", 0));
+    return true;
+}
+
+void Setting::setClipPos(int x, int y)
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) return;
+    common.SetNamedValue(L"clipX", JsonValue::CreateNumberValue(x));
+    common.SetNamedValue(L"clipY", JsonValue::CreateNumberValue(y));
+    save();
+}
+
+std::wstring Setting::getPhrasePath()
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) return L"";
+    return std::wstring{ common.GetNamedString(L"phrasePath", L"") };
+}
+
+void Setting::setPhrasePath(const std::wstring& path)
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) return;
+    common.SetNamedValue(L"phrasePath", JsonValue::CreateStringValue(path));
+    save();
+}
+
 int Setting::getDockEdge()
 {
     auto common = configObj.GetNamedObject(L"common", nullptr);

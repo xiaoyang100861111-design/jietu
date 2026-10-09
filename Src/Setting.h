@@ -28,6 +28,15 @@ public:
 	// 话术 / 剪切板面板的尺寸（逻辑像素）。高度 0 表示没调过：占满屏幕工作区的整个高度
 	std::pair<float, float> getClipSize();
 	void setClipSize(float w, float h);
+	// 面板的"固定"开关：固定后贴边的面板不会自己缩回去，用完一条话术也不关
+	bool getClipPinned();
+	void setClipPinned(bool val);
+	// 面板上次摆在哪（屏幕坐标）。没摆过返回 false
+	bool getClipPos(int& x, int& y);
+	void setClipPos(int x, int y);
+	// 话术页上次选中的分组（完整路径），下次打开还停在那儿
+	std::wstring getPhrasePath();
+	void setPhrasePath(const std::wstring& path);
 	int getDockEdge();
 	void setDockEdge(int val);
 	int getMouseTrigger();

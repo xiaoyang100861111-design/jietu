@@ -8,6 +8,7 @@
 #include "./Win/WinPin.h"
 #include "./Win/WinSetting.h"
 #include "./Win/WinClip.h"
+#include "./Win/WinPhraseEdit.h"
 #include "ClipHistory.h"
 #include "Log.h"
 
@@ -31,6 +32,7 @@ void App::dispose()
     WinPin::dispose();
     WinCap::dispose();
     WinSetting::dispose();
+    WinPhraseEdit::dispose();
     WinClip::dispose();
     ClipHistory::dispose();
     Lang::dispose();

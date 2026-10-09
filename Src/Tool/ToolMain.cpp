@@ -170,6 +170,10 @@ void ToolMain::onClick(Ling::Button* btn)
 		win->startTextWork(true);
 		return;
 	}
+	else if (btn->id == L"video") {
+		win->startRecord();
+		return;
+	}
 	// 再次点击已选中的按钮 = 取消选中（开关式）。cancelSelect 里已经做了配色复位、
 	// 隐藏 ToolSub 和重排，这里直接返回，不要再往下走选中流程。
 	if (btn->id == curId) {

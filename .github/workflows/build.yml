@@ -104,6 +104,27 @@ jobs:
           name: UUjietu
           path: x64/Release/UUjietu.exe
 
+      # GitHub 会把发布附件名里的中文去掉，所以另外把 exe 以中文名放到 dist 分支上：
+      # https://github.com/<仓库>/raw/dist/UU截图.exe 下载下来文件名就是中文的，而且永远是最新一版。
+      # 分支每次强推成只有一个提交，不让仓库越来越大
+      - name: Publish to dist branch
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'dist'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item "x64\Release\ScreenCapture.exe" (Join-Path $dir 'UU截图.exe')
+          Set-Location $dir
+          git init -q -b dist
+          git config user.name 'github-actions'
+          git config user.email 'actions@users.noreply.github.com'
+          git config core.quotepath false
+          git add -A
+          git commit -q -m "build ${{ github.run_number }}"
+          git push -f "https://x-access-token:$($env:GH_TOKEN)@github.com/${{ github.repository }}.git" dist
+          if ($LASTEXITCODE) { Write-Host 'push to dist failed'; exit 0 }
+
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
