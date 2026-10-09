@@ -5,7 +5,7 @@
 
 // 快捷话术 / 剪切板历史 共用的面板，顶上两个页签切换。整块内容自己画在一张画布上（同 WinCap / WinPin），
 // 只有搜索框是个真正的文本框控件。
-// 点一条（或回车）把它写回剪切板并粘贴到原来的窗口；右键只复制不粘贴。
+// 点一条（或回车）把它复制到系统剪切板（只复制，不替用户粘贴）。
 //
 // 摆放方式同老版 QQ 的主面板：拖着顶上那一条可以挪动；
 //   - 拖到屏幕边上就贴边：平时缩在屏幕外面，鼠标顶到那条边滑出来，移开又缩回去；
@@ -82,7 +82,7 @@ private:
 	void selectGroup(const std::wstring& full);
 	void scrollIntoView(int index);
 	void clampScroll();
-	// 把这一条写回剪切板；paste 为 true 时再替用户粘贴到原来的窗口。没固定的话顺手把面板收掉
+	// 把这一条写回系统剪切板并提示一句。paste 现在不用了：只复制，不替用户粘贴
 	void activate(int index, bool paste);
 	// 进入 / 退出"借搜索框输入"的状态
 	void beginInput(Input kind, const std::wstring& init = L"");

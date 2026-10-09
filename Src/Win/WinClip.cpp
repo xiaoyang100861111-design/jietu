@@ -608,7 +608,10 @@ void WinClip::rebuild()
 		Row row;
 		row.item = item;
 		row.top = contentH;
-		row.height = (item->type == ClipHistory::Type::Image ? 92.f : 58.f) * dpi;
+		// 图片行高一些放缩略图；话术没有底下那行小字，带备注的多给一行的高度，内容能显示全
+		float rowH = item->type == ClipHistory::Type::Image ? 92.f : 58.f;
+		if (mode == Phrase && !item->title.empty()) rowH += item->type == ClipHistory::Type::Image ? 20.f : 8.f;
+		row.height = rowH * dpi;
 		contentH += row.height;
 		rows.push_back(std::move(row));
 	}
@@ -770,9 +773,12 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 		const float toastW = textWidth(toastText, 13.f) + 28.f * dpi;
 		const float toastBottom = bottom - 12.f * dpi;
 		auto rect = D2D1::RectF((w - toastW) / 2.f, toastBottom - 32.f * dpi, (w + toastW) / 2.f, toastBottom);
-		brush->SetColor(D2D1::ColorF(0x000000, 0.75f));
+		// 白底、细边、绿字
+		brush->SetColor(D2D1::ColorF(0xFFFFFF));
 		ctx->FillRoundedRectangle(D2D1::RoundedRect(rect, 16.f * dpi, 16.f * dpi), brush.Get());
-		drawText(ctx, toastText, 13.f, rect, 0xFFFFFF, true, true);
+		brush->SetColor(D2D1::ColorF(0x07C160, 0.5f));
+		ctx->DrawRoundedRectangle(D2D1::RoundedRect(rect, 16.f * dpi, 16.f * dpi), brush.Get(), dpi);
+		drawText(ctx, toastText, 13.f, rect, 0x07C160, true, true);
 	}
 }
 
@@ -792,24 +798,25 @@ void WinClip::paintRow(ID2D1DeviceContext* ctx, const Row& row, int index, float
 	}
 	const float left = pad + 4.f * dpi;
 	const float right = btnRect(y, row.height, 2).left - 6.f * dpi; //右边留给三个小按钮
-	const float metaTop = y + row.height - 22.f * dpi;
+	// 剪切板页每行底下有一行小字（复制的时间、字数 / 尺寸）；话术页不要这行，地方全让给备注和内容
+	const bool hasMeta = mode == Clip;
+	const float metaTop = y + row.height - (hasMeta ? 22.f : 7.f) * dpi;
 	auto mainRect = D2D1::RectF(left, y + 8.f * dpi, right, metaTop);
-	// 下面那行小字：话术写它在哪个分组，剪切板写复制的时间；后面再跟上各类型自己的说明
-	std::wstring meta = mode == Phrase ? showPath(item.group) : timeStr(item.id);
+	std::wstring meta = timeStr(item.id);
 	auto addMeta = [&meta](const std::wstring& part) {
 		if (part.empty()) return;
 		if (!meta.empty()) meta += L"   ";
 		meta += part;
 	};
-	// 有备注名的：第一行是备注（主题色，一眼认出是哪条），内容退到第二行；没有的话内容占两行
+	// 有备注名的：第一行是备注（红字，一眼认出是哪条），内容在它下面；没有的话内容占满
 	auto drawMain = [&](const std::wstring& content) {
 		if (item.title.empty()) {
 			drawText(ctx, content, 13.f, mainRect, 0x222222);
 			return;
 		}
-		const float mid = mainRect.top + 19.f * dpi;
-		drawText(ctx, item.title, 13.f, D2D1::RectF(mainRect.left, mainRect.top, mainRect.right, mid), theme);
-		drawText(ctx, content, 12.f, D2D1::RectF(mainRect.left, mid, mainRect.right, mainRect.bottom + 2.f * dpi), 0x555555);
+		const float mid = mainRect.top + 20.f * dpi;
+		drawText(ctx, item.title, 13.f, D2D1::RectF(mainRect.left, mainRect.top, mainRect.right, mid), 0xE64340);
+		drawText(ctx, content, 13.f, D2D1::RectF(mainRect.left, mid, mainRect.right, mainRect.bottom), 0x222222);
 	};
 	if (item.type == ClipHistory::Type::Text) {
 		drawMain(preview(item.text, 200));
@@ -835,9 +842,13 @@ void WinClip::paintRow(ID2D1DeviceContext* ctx, const Row& row, int index, float
 		addMeta(count > 1 ? std::format(L"{} {}", count, Lang::get(L"clip.fileCount")) : first);
 	}
 	else {
-		// 图片：缩略图占着主区域，备注名放到小字里
-		addMeta(item.title);
+		// 图片：有备注名的话备注占第一行（红字），缩略图摆在它下面
 		addMeta(std::format(L"{} × {}", item.imgW, item.imgH));
+		if (!item.title.empty()) {
+			const float mid = mainRect.top + 20.f * dpi;
+			drawText(ctx, item.title, 13.f, D2D1::RectF(mainRect.left, mainRect.top, mainRect.right, mid), 0xE64340);
+			mainRect.top = mid;
+		}
 		if (auto thumb = getThumb(item)) {
 			// 等比缩进主区域里，靠左摆
 			auto size = thumb->GetSize();
@@ -849,7 +860,7 @@ void WinClip::paintRow(ID2D1DeviceContext* ctx, const Row& row, int index, float
 			ctx->DrawRectangle(dest, brush.Get(), 1.f);
 		}
 	}
-	drawText(ctx, meta, 11.f, D2D1::RectF(left, metaTop, right, y + row.height - 4.f * dpi), 0x999999, false, true);
+	if (hasMeta) drawText(ctx, meta, 11.f, D2D1::RectF(left, metaTop, right, y + row.height - 4.f * dpi), 0x999999, false, true);
 	// 右边的小按钮，平时淡淡地显示，光标移上去才加深。
 	// 话术页：✕ 删除、✎ 编辑、⇄ 换分组；剪切板页：✕ 删除、☆ 收藏、＋ 存为话术
 	auto btnColor = [&](Hit which, UINT hoverRgb) -> UINT {
@@ -953,8 +964,8 @@ void WinClip::onDown(POINT pos, bool isRight)
 	auto history = ClipHistory::get();
 	if (!history) return;
 	if (hit == Hit::Row) {
-		// 左键：复制并粘贴到原来的窗口；右键：只放进剪切板，不替用户粘贴
-		activate(index, !isRight);
+		// 左右键都一样：复制到剪切板
+		activate(index, false);
 		return;
 	}
 	if (hit == Hit::Tab && mode == Phrase) {
@@ -1208,7 +1219,7 @@ void WinClip::endInput(bool commit)
 void WinClip::toast(const std::wstring& text)
 {
 	toastText = text;
-	setTimer(1500, timerToast);
+	setTimer(1000, timerToast);
 	refresh();
 }
 
@@ -1355,7 +1366,7 @@ void WinClip::onKey(UINT key)
 		refresh();
 	}
 	else if (key == VK_RETURN) {
-		activate(selRow, true);
+		activate(selRow, false);
 	}
 	else if (key == VK_DELETE) {
 		// 搜索框里有字时 Delete 是在删字，不是删选中的那一行
@@ -1369,16 +1380,13 @@ void WinClip::onKey(UINT key)
 	}
 }
 
+// 点一条 / 回车：只把它放进系统剪切板，底下提示一句。不替用户粘贴 ——
+// 粘到哪儿、什么时候粘由用户自己来（在聊天窗口里自动粘贴等于替人把话贴出去了）
 void WinClip::activate(int index, bool paste)
 {
 	if (index < 0 || index >= (int)rows.size()) return;
 	auto history = ClipHistory::get();
 	if (!history) return;
-	const auto id = rows[index].item->id;
-	auto target = prevHwnd;
-	// 没固定：用完就收（先收再写剪切板，那样 writeToClipboard 触发的 onChanged 就不会再去重建列表）。
-	// 固定了：面板留着，接着点下一条
-	if (!pinned) requestClose();
-	if (!history->writeToClipboard(id)) return;
-	if (paste) history->pasteTo(target);
+	const bool ok = history->writeToClipboard(rows[index].item->id);
+	toast(Lang::get(ok ? L"clip.copied" : L"clip.copyFailed"));
 }
