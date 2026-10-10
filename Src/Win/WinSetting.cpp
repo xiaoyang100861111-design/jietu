@@ -95,10 +95,9 @@ void WinSetting::onCreated()
 	verLabel->setMarginLeft(20.f);
 	verLabel->setColor(0x666666FF);
 	updateBtn = header->makeChild<Ling::Button>();
-	updateBtn->setHeight(26.f);
-	updateBtn->setWidth(260.f);
+	updateBtn->setHeight(24.f);
+	updateBtn->setFontSize(12.f);
 	updateBtn->setMarginRight(50.f); //给右上角的关闭按钮让位
-	updateBtn->setAlignItems(Ling::Align::FlexEnd);
 	updateBtn->setBg(0);
 	updateBtn->setHoverBg(0);
 	// 点它 = 手动检查：有新版弹升级窗口，没有就说一声已是最新
@@ -204,6 +203,14 @@ void WinSetting::refreshUpdateBtn()
 	// 有新版本用红色，够显眼；其余是不起眼的灰色
 	const uint32_t color = state == 2 ? 0xE64340FF : 0x888888FF;
 	updateBtn->setText(text);
+	// 按钮只有文字那么宽：整条状态栏其余的地方是拖窗口用的，不该一点就去检查更新
+	float textW{ 120.f };
+	if (auto layout = Ling::D2D::makeTextLayout(text, 12.f * dpi)) {
+		DWRITE_TEXT_METRICS tm{};
+		layout->GetMetrics(&tm);
+		textW = tm.widthIncludingTrailingWhitespace / dpi;
+	}
+	updateBtn->setWidth(textW + 16.f);
 	updateBtn->setColor(color);
 	updateBtn->setHoverColor(state == 2 ? 0xC0392BFF : 0x555555FF);
 }
@@ -221,7 +228,9 @@ LRESULT WinSetting::onHitTest(const POINT pos)
 	if (pt.x > 0 && pt.y > 0 && pt.x < w - 32 * dpi && pt.y < 40 * dpi) {
 		return HTCAPTION;
 	}
-	if (pt.x > 0 && pt.y > 40*4*dpi && pt.x < 120 * dpi && pt.y < h) {
+	// 左边菜单下面的空白也能拖窗口。起点要在最后一个菜单项之下：
+	// 顶上留白 40 + 四个菜单项各 40（原来按三项算，第四项"配置目录"就被当成标题栏，点不到）
+	if (pt.x > 0 && pt.y > 40 * 5 * dpi && pt.x < 120 * dpi && pt.y < h) {
 		return HTCAPTION;
 	}
 	return HTCLIENT;
