@@ -8,6 +8,11 @@ on:
 permissions:
   contents: write
 
+# 连着推了好几次时只编最新的那一次，前面还没编完的直接取消
+concurrency:
+  group: build
+  cancel-in-progress: true
+
 env:
   # 依赖都钉死版本，免得上游一动这边就编不过
   LING_REF: b77448ec7e72b1b961d3c6f8f87502d8df72aa5f
@@ -24,6 +29,14 @@ jobs:
           repository: xland/Ling
           ref: ${{ env.LING_REF }}
           path: deps/Ling
+
+      # Ling / Yoga 这两个库钉死了版本，编出来的 .lib 不会变，缓存起来不用每次重编。
+      # 必须放在上面那步 checkout 之后：checkout 会把目录清干净
+      - name: Cache Ling build
+        uses: actions/cache@v4
+        with:
+          path: deps/Ling/x64/Release
+          key: ling-${{ env.LING_REF }}-v1
 
       - name: Checkout gifski
         shell: pwsh
@@ -71,8 +84,12 @@ jobs:
             msbuild @args @common 2>&1 | Tee-Object -FilePath build.log -Append
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
           }
-          Build "$ling\yoga\yoga.vcxproj" "/p:SolutionDir=$ling\"
-          Build "$ling\Ling.vcxproj" "/p:SolutionDir=$ling\"
+          if ((Test-Path "$ling\x64\Release\Ling.lib") -and (Test-Path "$ling\x64\Release\yoga.lib")) {
+            Write-Host 'Ling / Yoga: using cached libs'
+          } else {
+            Build "$ling\yoga\yoga.vcxproj" "/p:SolutionDir=$ling\"
+            Build "$ling\Ling.vcxproj" "/p:SolutionDir=$ling\"
+          }
           Get-ChildItem "$ling\x64\Release" -Filter *.lib | Select-Object Name, Length
           Build "$root\Src\ScreenCapture.vcxproj" "/p:SolutionDir=$root\" "/p:LingDir=$ling" "/p:GifskiDir=$root\deps\gifski"
           Get-ChildItem "$root\x64\Release" -Filter *.exe | Select-Object Name, Length
