@@ -46,10 +46,34 @@ void WinSetting::init()
 	// 已经开着就拉到前台，不建第二个。原来是"关掉旧的再建新的"，那样会和上面那个
 	// 延迟释放撞车：排在队列里的 reset 跑起来时放掉的是刚建好的这一个
 	if (winSetting) {
-		SetForegroundWindow(winSetting->hwnd);
+		raise();
 		return;
 	}
 	winSetting.reset(new WinSetting());
+	raise();
+}
+
+void WinSetting::raise()
+{
+	if (!winSetting || !winSetting->hwnd) return;
+	auto hwnd = winSetting->hwnd;
+	// 最小化着的先还原
+	if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);
+	else ShowWindow(hwnd, SW_SHOW);
+	// 先顶到最上层再放下来：单靠 SetForegroundWindow，系统有时不让抢前台，窗口还是被压在别的窗口下面。
+	// 这样做哪怕没抢到焦点，窗口也一定浮到了所有普通窗口之上
+	SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	SetForegroundWindow(hwnd);
+	SetActiveWindow(hwnd);
+	// 窗口和任务栏按钮一起闪两下，一眼就能看到它在哪
+	FLASHWINFO flash{};
+	flash.cbSize = sizeof(flash);
+	flash.hwnd = hwnd;
+	flash.dwFlags = FLASHW_ALL;
+	flash.uCount = 2;
+	flash.dwTimeout = 120;
+	FlashWindowEx(&flash);
 }
 
 void WinSetting::dispose()

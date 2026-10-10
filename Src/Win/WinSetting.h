@@ -6,6 +6,9 @@ class WinSetting :public Ling::WinBase
 public:
 	~WinSetting();
 	static void init();
+	// 设置窗口开着的话把它弄到最前面来（最小化了就还原），并闪两下提醒位置；没开就什么都不做。
+	// 点托盘图标时调：窗口常常被别的窗口盖住了、或者缩在任务栏里，用户找不到
+	static void raise();
 	// 退出流程里调：窗口对象是文件级静态变量，交给静态析构就在 CoUninitialize 之后了
 	static void dispose();
 private:

@@ -61,6 +61,8 @@ Tray* Tray::get()
 
 void Tray::onTrayRightClick()
 {
+	// 设置窗口开着的话先把它弄到最前面，再出菜单
+	WinSetting::raise();
 	auto menu = CreatePopupMenu();
 	AppendMenu(menu, MF_STRING, capMsg, Lang::get(L"tray.cap").data());
 	AppendMenu(menu, MF_STRING, delayMsg, Lang::get(L"tray.delay").data());
