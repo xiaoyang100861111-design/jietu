@@ -323,16 +323,21 @@ namespace {
 		return dst;
 	}
 
+	// WinRT 的类型不让直接 new（它们本身就是个引用计数的句柄），包一层普通结构体再放到堆上
+	struct ClientHolder {
+		HttpClient client;
+	};
+
 	// 识别用的 HTTP 客户端，同样整个进程一个、一直留着（理由见 sharedClient）
 	HttpClient& lensClient()
 	{
-		static HttpClient* client = []() {
-			auto ptr = new HttpClient();
-			ptr->DefaultRequestHeaders().UserAgent().TryParseAdd(
+		static ClientHolder* holder = []() {
+			auto ptr = new ClientHolder();
+			ptr->client.DefaultRequestHeaders().UserAgent().TryParseAdd(
 				L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
 			return ptr;
 		}();
-		return *client;
+		return holder->client;
 	}
 
 	// 返回的直接就是一段段的文字（Google 自己分好了段），坐标是原图的像素
@@ -551,13 +556,13 @@ namespace {
 	// 故意不释放 —— 留给静态析构的话，那时 COM 已经拆掉了，放 WinRT 对象会出事
 	HttpClient& sharedClient()
 	{
-		static HttpClient* client = []() {
-			auto ptr = new HttpClient();
-			ptr->DefaultRequestHeaders().UserAgent().TryParseAdd(
+		static ClientHolder* holder = []() {
+			auto ptr = new ClientHolder();
+			ptr->client.DefaultRequestHeaders().UserAgent().TryParseAdd(
 				L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0");
 			return ptr;
 		}();
-		return *client;
+		return holder->client;
 	}
 
 	// 带着说明文字的失败（接口返回了看不懂的内容之类，没有系统错误码可用）

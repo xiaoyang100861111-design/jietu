@@ -17,6 +17,55 @@
 
 std::unique_ptr<App> app;
 
+namespace {
+    // 让图形设备一直留着。
+    // Ling 在"一个窗口都不剩"时会把整套 D3D / D2D / DWrite 设备销毁，下次建窗口再重建。
+    // 只挂着托盘图标待命时正是一个窗口都没有，于是每按一次截图快捷键都要先花几百毫秒
+    // 把设备和字体重新建一遍 —— 开着设置窗口时截图快、缩到托盘后截图慢，就是这个原因。
+    // 办法是放一个永远不建实际窗口的窗口对象占着位：Ling 数窗口数的是对象，不是句柄。
+    // 代价是待命时多占几十 MB 内存，换来截图随叫随到
+    class KeepAlive : public Ling::WinBase {};
+    std::unique_ptr<KeepAlive> keepAlive;
+
+    // 启动后稍等一下，把图形设备提前建好：第一次截图也不用等
+    void CALLBACK onWarmTimer(HWND, UINT, UINT_PTR id, DWORD)
+    {
+        KillTimer(nullptr, id);
+        if (Ling::App::get()) Ling::D2D::get();
+    }
+
+    // 桌面上放一个指向本程序的快捷方式。没有就建；有但指的不是现在这个 exe
+    // （程序被挪了地方、换了名字，快捷方式就失效了）就重新写一遍
+    void ensureDesktopShortcut()
+    {
+        wchar_t exe[MAX_PATH]{};
+        if (GetModuleFileName(nullptr, exe, MAX_PATH) == 0) return;
+        PWSTR desktop{ nullptr };
+        if (FAILED(SHGetKnownFolderPath(FOLDERID_Desktop, 0, nullptr, &desktop)) || !desktop) return;
+        auto lnk = std::filesystem::path{ desktop } / L"UU截图.lnk";
+        CoTaskMemFree(desktop);
+        Microsoft::WRL::ComPtr<IShellLink> link;
+        Microsoft::WRL::ComPtr<IPersistFile> file;
+        if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(link.GetAddressOf())))) return;
+        if (FAILED(link.As(&file))) return;
+        std::error_code ec;
+        if (std::filesystem::exists(lnk, ec) && SUCCEEDED(file->Load(lnk.c_str(), STGM_READ))) {
+            wchar_t target[MAX_PATH]{};
+            // 已经指着现在这个 exe：不用动（路径不分大小写）
+            if (SUCCEEDED(link->GetPath(target, MAX_PATH, nullptr, SLGP_RAWPATH)) && _wcsicmp(target, exe) == 0) return;
+        }
+        auto dir = std::filesystem::path{ exe }.parent_path().wstring();
+        link->SetPath(exe);
+        link->SetArguments(L"");
+        link->SetWorkingDirectory(dir.c_str());
+        link->SetIconLocation(exe, 0);
+        link->SetDescription(L"UU截图");
+        if (FAILED(file->Save(lnk.c_str(), TRUE))) Log::write(L"ERROR desktop shortcut: save failed " + lnk.wstring());
+        else Log::write(L"desktop shortcut -> " + std::wstring{ exe });
+    }
+}
+
+
 
 App::~App()
 {
@@ -100,54 +149,6 @@ void App::excludeFromCapture(HWND hwnd)
     }();
     if (!supported) return;
     SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
-}
-
-namespace {
-    // 让图形设备一直留着。
-    // Ling 在"一个窗口都不剩"时会把整套 D3D / D2D / DWrite 设备销毁，下次建窗口再重建。
-    // 只挂着托盘图标待命时正是一个窗口都没有，于是每按一次截图快捷键都要先花几百毫秒
-    // 把设备和字体重新建一遍 —— 开着设置窗口时截图快、缩到托盘后截图慢，就是这个原因。
-    // 办法是放一个永远不建实际窗口的窗口对象占着位：Ling 数窗口数的是对象，不是句柄。
-    // 代价是待命时多占几十 MB 内存，换来截图随叫随到
-    class KeepAlive : public Ling::WinBase {};
-    std::unique_ptr<KeepAlive> keepAlive;
-
-    // 启动后稍等一下，把图形设备提前建好：第一次截图也不用等
-    void CALLBACK onWarmTimer(HWND, UINT, UINT_PTR id, DWORD)
-    {
-        KillTimer(nullptr, id);
-        if (Ling::App::get()) Ling::D2D::get();
-    }
-
-    // 桌面上放一个指向本程序的快捷方式。没有就建；有但指的不是现在这个 exe
-    // （程序被挪了地方、换了名字，快捷方式就失效了）就重新写一遍
-    void ensureDesktopShortcut()
-    {
-        wchar_t exe[MAX_PATH]{};
-        if (GetModuleFileName(nullptr, exe, MAX_PATH) == 0) return;
-        PWSTR desktop{ nullptr };
-        if (FAILED(SHGetKnownFolderPath(FOLDERID_Desktop, 0, nullptr, &desktop)) || !desktop) return;
-        auto lnk = std::filesystem::path{ desktop } / L"UU截图.lnk";
-        CoTaskMemFree(desktop);
-        Microsoft::WRL::ComPtr<IShellLink> link;
-        Microsoft::WRL::ComPtr<IPersistFile> file;
-        if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(link.GetAddressOf())))) return;
-        if (FAILED(link.As(&file))) return;
-        std::error_code ec;
-        if (std::filesystem::exists(lnk, ec) && SUCCEEDED(file->Load(lnk.c_str(), STGM_READ))) {
-            wchar_t target[MAX_PATH]{};
-            // 已经指着现在这个 exe：不用动（路径不分大小写）
-            if (SUCCEEDED(link->GetPath(target, MAX_PATH, nullptr, SLGP_RAWPATH)) && _wcsicmp(target, exe) == 0) return;
-        }
-        auto dir = std::filesystem::path{ exe }.parent_path().wstring();
-        link->SetPath(exe);
-        link->SetArguments(L"");
-        link->SetWorkingDirectory(dir.c_str());
-        link->SetIconLocation(exe, 0);
-        link->SetDescription(L"UU截图");
-        if (FAILED(file->Save(lnk.c_str(), TRUE))) Log::write(L"ERROR desktop shortcut: save failed " + lnk.wstring());
-        else Log::write(L"desktop shortcut -> " + std::wstring{ exe });
-    }
 }
 
 App::App()
