@@ -97,7 +97,7 @@ void WinSetting::onCreated()
 	updateBtn = header->makeChild<Ling::Button>();
 	updateBtn->setHeight(24.f);
 	updateBtn->setFontSize(12.f);
-	updateBtn->setMarginRight(50.f); //给右上角的关闭按钮让位
+	updateBtn->setMarginRight(134.f); //给右上角的最小化 / 最大化 / 关闭三个按钮让位
 	updateBtn->setBg(0);
 	updateBtn->setHoverBg(0);
 	// 点它 = 手动检查：有新版弹升级窗口，没有就说一声已是最新
@@ -120,6 +120,26 @@ void WinSetting::onCreated()
 	closeBtn->onClick.add([](Ling::Button* btn) {
 		btn->win->close();
 		});
+	// 最大化 / 还原、最小化，排在关闭按钮左边
+	auto makeTopBtn = [this](float right, const std::wstring& text) {
+		auto btn = body->makeChild<Ling::Button>();
+		btn->setSize(42.f, 32.f);
+		btn->setPositionType(Ling::Position::Absolute);
+		btn->setPosition(Ling::Edge::Right, right);
+		btn->setPosition(Ling::Edge::Top, 0);
+		btn->setText(text);
+		btn->setFontSize(13.f);
+		btn->setBg(0);
+		btn->setHoverBg(0xDDDDE0FF);
+		return btn;
+	};
+	makeTopBtn(42.f, L"☐")->onClick.add([](Ling::Button* btn) {
+		if (btn->win->isMaximized) btn->win->restore();
+		else btn->win->maximize();
+	});
+	makeTopBtn(84.f, L"—")->onClick.add([](Ling::Button* btn) {
+		btn->win->minimize();
+	});
 	show();
 }
 void WinSetting::initMenuItems(Ling::Node* menuBox)
@@ -225,7 +245,8 @@ LRESULT WinSetting::onHitTest(const POINT pos)
 		auto result = borderHitTest(pt);
 		if (result != HTCLIENT) return result;
 	}
-	if (pt.x > 0 && pt.y > 0 && pt.x < w - 32 * dpi && pt.y < 40 * dpi) {
+	// 右边 126 宽是最小化 / 最大化 / 关闭三个按钮
+	if (pt.x > 0 && pt.y > 0 && pt.x < w - 126 * dpi && pt.y < 40 * dpi) {
 		return HTCAPTION;
 	}
 	// 左边菜单下面的空白也能拖窗口。起点要在最后一个菜单项之下：

@@ -323,6 +323,18 @@ namespace {
 		return dst;
 	}
 
+	// 识别用的 HTTP 客户端，同样整个进程一个、一直留着（理由见 sharedClient）
+	HttpClient& lensClient()
+	{
+		static HttpClient* client = []() {
+			auto ptr = new HttpClient();
+			ptr->DefaultRequestHeaders().UserAgent().TryParseAdd(
+				L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
+			return ptr;
+		}();
+		return *client;
+	}
+
 	// 返回的直接就是一段段的文字（Google 自己分好了段），坐标是原图的像素
 	std::vector<Translate::Block> recognizeGoogle(int w, int h, const std::vector<BYTE>& pixels)
 	{
@@ -365,9 +377,7 @@ namespace {
 		pbBytes(objects, 3, image);
 		pbBytes(body, 1, objects);
 
-		HttpClient client2;
-		client2.DefaultRequestHeaders().UserAgent().TryParseAdd(
-			L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
+		auto& client2 = lensClient();
 		HttpRequestMessage req{ HttpMethod::Post(), Uri{ lensUrl } };
 		HttpBufferContent content{ CryptographicBuffer::CreateFromByteArray(
 			winrt::array_view<const uint8_t>(body.data(), body.data() + body.size())) };
@@ -534,6 +544,20 @@ namespace {
 			if (stat.latin * 10 > total * 9) return L"zh-Hans";
 		}
 		return target;
+	}
+
+	// 识别、翻译共用的 HTTP 客户端，整个进程就这一个，一直留着：
+	// 连接可以复用，连着翻译几次时不用每次都重新握手。
+	// 故意不释放 —— 留给静态析构的话，那时 COM 已经拆掉了，放 WinRT 对象会出事
+	HttpClient& sharedClient()
+	{
+		static HttpClient* client = []() {
+			auto ptr = new HttpClient();
+			ptr->DefaultRequestHeaders().UserAgent().TryParseAdd(
+				L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0");
+			return ptr;
+		}();
+		return *client;
 	}
 
 	// 带着说明文字的失败（接口返回了看不懂的内容之类，没有系统错误码可用）
@@ -722,9 +746,7 @@ namespace {
 	// 全都不通就把每一家各自的错误原因带出去
 	void translate(const std::wstring& target, std::vector<Translate::Block>& blocks, const std::wstring& engine)
 	{
-		HttpClient client;
-		client.DefaultRequestHeaders().UserAgent().TryParseAdd(
-			L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0");
+		auto& client = sharedClient();
 		std::vector<std::wstring> order{ L"google", L"microsoft", L"tencent" };
 		if (auto it = std::find(order.begin(), order.end(), engine); it != order.end()) std::rotate(order.begin(), it, it + 1);
 		std::wstring detail;
