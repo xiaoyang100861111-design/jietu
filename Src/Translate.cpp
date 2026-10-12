@@ -818,6 +818,16 @@ namespace {
 				// 用户选的就是 Google，系统的只是个退路
 				if (!googleFailed) throw;
 			}
+			catch (...) {
+				// 有的电脑系统里压根没有文字识别这个组件（精简版 / LTSC / 服务器版），一用就是"没有注册类"。
+				// 这不该当成莫名其妙的"处理失败"：记下原因，按"系统自带的识别用不了"往下走
+				auto why = L"system ocr: " + Log::describe();
+				Log::write(L"ERROR " + why);
+				if (!ocrDetail.empty()) ocrDetail += L"\n";
+				ocrDetail += why;
+				result.blocks.clear();
+				if (!opt.googleOcr) throw WorkError{ L"translate.noEngine", ocrDetail };
+			}
 		}
 		// 在线识别没连上，系统自带的又认不出来（多半是它不支持的文字）：把真正的原因告诉用户
 		if (result.blocks.empty()) {
@@ -948,18 +958,33 @@ void Translate::start(int w, int h, const std::vector<BYTE>& pixels, bool needTr
 // 与 WinPin::getImagePixels 同一套做法（SetTarget → BeginDraw → EndDraw → SetTarget(nullptr) 闭环）
 std::wstring Translate::langTitle(const Result& result)
 {
-	// 各家接口的语言代码写法不一样（zh-Hans / zh-CN / zh），先归成一种再去取名字；没收录的语言就显示代码本身
+	// 三家接口的语言代码写法不一样（谷歌 zh-CN / iw，微软 zh-Hans / sr-Cyrl / nb，腾讯 zh），先归成一种再去取名字。
+	// 名字表（langName）是谷歌和微软两家支持的全部语言合起来的，键一律小写
 	auto nameOf = [](std::wstring code) {
 		if (code.empty()) return Lang::get(L"langName.auto");
-		std::transform(code.begin(), code.end(), code.begin(), [](wchar_t c) { return (wchar_t)towlower(c); });
-		if (code == L"zh-hant" || code == L"zh-tw" || code == L"zh-hk" || code == L"cht") code = L"zh-TW";
-		else if (code.starts_with(L"zh")) code = L"zh-CN";
+		std::transform(code.begin(), code.end(), code.begin(), [](wchar_t c) { return c == L'_' ? L'-' : (wchar_t)towlower(c); });
+		if (code == L"auto" || code == L"auto-detect") return Lang::get(L"langName.auto");
+		if (code == L"zh-hant" || code == L"zh-tw" || code == L"zh-hk" || code == L"zh-mo" || code == L"cht") code = L"zh-tw";
+		else if (code == L"zh" || code == L"zh-hans" || code == L"zh-cn" || code == L"zh-sg" || code == L"chs") code = L"zh-cn";
 		else if (code == L"iw") code = L"he";
-		else if (code == L"nb") code = L"no";
-		else if (auto pos = code.find(L'-'); pos != std::wstring::npos) code = code.substr(0, pos);
-		const auto key = L"langName." + code;
-		auto name = Lang::get(key);
-		return name == key ? code : name;
+		else if (code == L"jw") code = L"jv";
+		else if (code == L"in") code = L"id";
+		auto lookup = [](const std::wstring& name) {
+			const auto key = L"langName." + name;
+			auto text = Lang::get(key);
+			return text == key ? std::wstring{} : text;
+		};
+		// 先按整个代码找（sr-cyrl、pt-pt 这种带后缀的有自己的名字），没有再去掉后缀找
+		auto name = lookup(code);
+		if (name.empty()) {
+			if (auto pos = code.find(L'-'); pos != std::wstring::npos) name = lookup(code.substr(0, pos));
+		}
+		if (name.empty()) {
+			// 表里没有的：问系统要这个语言的名字（系统是什么语言就给什么语言的叫法）
+			wchar_t buf[128]{};
+			if (GetLocaleInfoEx(code.c_str(), LOCALE_SLOCALIZEDLANGUAGENAME, buf, 128) > 1) name = buf;
+		}
+		return name.empty() ? code : name;
 	};
 	return nameOf(result.srcLang) + L" → " + nameOf(result.dstLang);
 }
