@@ -204,10 +204,10 @@ void Setting::setClipEnabled(bool val)
 std::pair<float, float> Setting::getClipSize()
 {
     auto common = configObj.GetNamedObject(L"common", nullptr);
-    if (!common) return { 420.f, 0.f };
-    auto w = static_cast<float>(common.GetNamedNumber(L"clipW", 420.));
+    if (!common) return { 480.f, 0.f };
+    auto w = static_cast<float>(common.GetNamedNumber(L"clipW", 480.));
     auto h = static_cast<float>(common.GetNamedNumber(L"clipH", 0.));
-    if (w < 300.f || w > 4000.f) w = 420.f;
+    if (w < 300.f || w > 4000.f) w = 480.f;
     if (h < 260.f || h > 4000.f) h = 0.f;
     return { w, h };
 }

@@ -830,17 +830,21 @@ void WinClip::paintPunch(ID2D1DeviceContext* ctx)
 	if (!punch) return;
 	const UINT theme = Setting::get()->getThemeColor();
 	const UINT green = 0x07C160, red = 0xE64340, orange = 0xFA8C16;
+	// 打卡页整体放大一号：这一页是给人一眼看状态、随手点按钮的，字和按钮都比列表页大。
+	// k 是放大倍数，u 是放大后的一个逻辑像素；下面所有尺寸都用 u，字号都乘 k
+	const float k = 1.25f;
+	const float u = dpi * k;
 	const float pad = 10.f * dpi;
 	const auto state = punch->getState();
 	const auto cur = punch->current();
 	const auto nowMs = ::Punch::now();
 	auto fillRound = [&](const D2D1_RECT_F& rect, float radius, UINT rgb, float alpha = 1.f) {
 		brush->SetColor(D2D1::ColorF(rgb, alpha));
-		ctx->FillRoundedRectangle(D2D1::RoundedRect(rect, radius * dpi, radius * dpi), brush.Get());
+		ctx->FillRoundedRectangle(D2D1::RoundedRect(rect, radius * u, radius * u), brush.Get());
 	};
 	auto strokeRound = [&](const D2D1_RECT_F& rect, float radius, UINT rgb, float alpha = 1.f) {
 		brush->SetColor(D2D1::ColorF(rgb, alpha));
-		ctx->DrawRoundedRectangle(D2D1::RoundedRect(rect, radius * dpi, radius * dpi), brush.Get(), dpi);
+		ctx->DrawRoundedRectangle(D2D1::RoundedRect(rect, radius * u, radius * u), brush.Get(), dpi);
 	};
 	// 登记一个按钮，返回光标是不是正悬在它上面
 	auto addBtn = [&](const D2D1_RECT_F& rect, const std::wstring& id, bool enabled) {
@@ -849,7 +853,7 @@ void WinClip::paintPunch(ID2D1DeviceContext* ctx)
 	};
 
 	// —— 状态卡：现在是什么状态、计时、上班时间 ——
-	auto card = D2D1::RectF(pad, 46.f * dpi, w - pad, 164.f * dpi);
+	auto card = D2D1::RectF(pad, 46.f * dpi, w - pad, 46.f * dpi + 118.f * u);
 	fillRound(card, 10.f, 0xFFFFFF);
 	strokeRound(card, 10.f, 0xE3E3E5);
 	const Punch::Activity* rule = cur ? punch->findActivity(cur->act) : nullptr;
@@ -863,13 +867,13 @@ void WinClip::paintPunch(ID2D1DeviceContext* ctx)
 	else if (state == Punch::State::Done) title = Lang::get(L"punch.stDone");
 	else title = Lang::get(L"punch.stOff");
 	brush->SetColor(D2D1::ColorF(color));
-	ctx->FillEllipse(D2D1::Ellipse(D2D1::Point2F(card.left + 20.f * dpi, card.top + 26.f * dpi), 5.f * dpi, 5.f * dpi), brush.Get());
-	drawText(ctx, title, 17.f, D2D1::RectF(card.left + 34.f * dpi, card.top + 10.f * dpi, card.right - 150.f * dpi, card.top + 42.f * dpi), 0x222222, false, true);
+	ctx->FillEllipse(D2D1::Ellipse(D2D1::Point2F(card.left + 20.f * u, card.top + 26.f * u), 5.f * u, 5.f * u), brush.Get());
+	drawText(ctx, title, 17.f * k, D2D1::RectF(card.left + 34.f * u, card.top + 10.f * u, card.right - 150.f * u, card.top + 42.f * u), 0x222222, false, true);
 	// 右边的大计时：活动中是这次离开了多久，上班中是今天上了多久
 	std::wstring big = state == Punch::State::Away ? clockStr(awaySec)
 		: state == Punch::State::Working ? clockStr(punch->workSeconds()) : punch->getDay();
-	drawText(ctx, big, state == Punch::State::Away || state == Punch::State::Working ? 22.f : 13.f,
-		D2D1::RectF(card.right - 150.f * dpi, card.top + 8.f * dpi, card.right - 14.f * dpi, card.top + 44.f * dpi),
+	drawText(ctx, big, (state == Punch::State::Away || state == Punch::State::Working ? 22.f : 13.f) * k,
+		D2D1::RectF(card.right - 150.f * u, card.top + 8.f * u, card.right - 14.f * u, card.top + 44.f * u),
 		state == Punch::State::Away ? color : state == Punch::State::Working ? 0x222222 : 0x999999, false, true);
 	// 第二行：上下班时间、纯工作时间
 	std::wstring line;
@@ -882,38 +886,38 @@ void WinClip::paintPunch(ID2D1DeviceContext* ctx)
 		if (state == Punch::State::Done) line += std::format(L"    {} {}", Lang::get(L"punch.outAt"), ::Punch::fmtClock(punch->lastOut()));
 		line += std::format(L"    {} {}", Lang::get(L"punch.pureTime"), ::Punch::fmtDuration(pure));
 	}
-	drawText(ctx, line, 12.f, D2D1::RectF(card.left + 20.f * dpi, card.top + 50.f * dpi, card.right - 14.f * dpi, card.top + 74.f * dpi), 0x666666, false, true);
+	drawText(ctx, line, 12.f * k, D2D1::RectF(card.left + 20.f * u, card.top + 50.f * u, card.right - 14.f * u, card.top + 74.f * u), 0x666666, false, true);
 	// 第三行：活动的限时和进度条
 	if (state == Punch::State::Away) {
 		std::wstring tip = limitSec <= 0 ? Lang::get(L"punch.noLimit")
 			: over ? std::format(L"{} {}，{}", Lang::get(L"punch.overtime"), ::Punch::fmtDuration(awaySec - limitSec), Lang::get(L"punch.pleaseBack"))
 			: std::format(L"{} {} {}", Lang::get(L"punch.limitTime"), rule->limitMin, Lang::get(L"punch.minute"));
-		drawText(ctx, tip, 12.f, D2D1::RectF(card.left + 20.f * dpi, card.top + 74.f * dpi, card.right - 14.f * dpi, card.top + 96.f * dpi), over ? red : 0x666666, false, true);
+		drawText(ctx, tip, 12.f * k, D2D1::RectF(card.left + 20.f * u, card.top + 74.f * u, card.right - 14.f * u, card.top + 96.f * u), over ? red : 0x666666, false, true);
 		if (limitSec > 0) {
-			auto track = D2D1::RectF(card.left + 20.f * dpi, card.bottom - 16.f * dpi, card.right - 20.f * dpi, card.bottom - 10.f * dpi);
+			auto track = D2D1::RectF(card.left + 20.f * u, card.bottom - 16.f * u, card.right - 20.f * u, card.bottom - 10.f * u);
 			fillRound(track, 3.f, 0xE9E9EC);
 			const float ratio = (std::min)(1.f, (float)awaySec / (float)limitSec);
 			auto fill = track;
 			fill.right = track.left + (track.right - track.left) * ratio;
-			if (fill.right - fill.left >= 6.f * dpi) fillRound(fill, 3.f, over ? red : theme);
+			if (fill.right - fill.left >= 6.f * u) fillRound(fill, 3.f, over ? red : theme);
 		}
 	}
 
 	// —— 操作按钮 ——
-	float y = card.bottom + 12.f * dpi;
+	float y = card.bottom + 12.f * u;
 	auto bigBtn = [&](const std::wstring& id, const std::wstring& text, UINT rgb, bool filled, float height) {
-		auto rect = D2D1::RectF(pad, y, w - pad, y + height * dpi);
+		auto rect = D2D1::RectF(pad, y, w - pad, y + height * u);
 		const bool isHover = addBtn(rect, id, true);
 		if (filled) {
 			fillRound(rect, 8.f, rgb, isHover ? 0.85f : 1.f);
-			drawText(ctx, text, 15.f, rect, 0xFFFFFF, true, true);
+			drawText(ctx, text, 15.f * k, rect, 0xFFFFFF, true, true);
 		}
 		else {
 			fillRound(rect, 8.f, isHover ? rgb : 0xFFFFFF, isHover ? 0.08f : 1.f);
 			strokeRound(rect, 8.f, rgb, 0.6f);
-			drawText(ctx, text, 14.f, rect, rgb, true, true);
+			drawText(ctx, text, 14.f * k, rect, rgb, true, true);
 		}
-		y = rect.bottom + 10.f * dpi;
+		y = rect.bottom + 10.f * u;
 	};
 	if (state == Punch::State::Off || state == Punch::State::Done) {
 		bigBtn(L"in", Lang::get(state == Punch::State::Done ? L"punch.btnInAgain" : L"punch.btnIn"), green, true, 46.f);
@@ -925,7 +929,7 @@ void WinClip::paintPunch(ID2D1DeviceContext* ctx)
 	else {
 		// 上班中：各项活动两列排开，每个按钮上写着今天用了几次、多久
 		auto& acts = punch->getActivities();
-		const float gap = 8.f * dpi, cellW = (w - pad * 2.f - gap) / 2.f, cellH = 56.f * dpi;
+		const float gap = 8.f * u, cellW = (w - pad * 2.f - gap) / 2.f, cellH = 56.f * u;
 		for (size_t i = 0; i < acts.size(); i++) {
 			auto& act = acts[i];
 			const float left = pad + (i % 2) * (cellW + gap);
@@ -936,38 +940,38 @@ void WinClip::paintPunch(ID2D1DeviceContext* ctx)
 			const bool isHover = addBtn(rect, L"act:" + act.id, !full);
 			fillRound(rect, 8.f, isHover ? theme : 0xFFFFFF, isHover ? 0.08f : 1.f);
 			strokeRound(rect, 8.f, isHover ? theme : 0xE3E3E5);
-			drawText(ctx, act.name, 14.f, D2D1::RectF(left + 14.f * dpi, top + 7.f * dpi, rect.right - 8.f * dpi, top + 31.f * dpi),
+			drawText(ctx, act.name, 14.f * k, D2D1::RectF(left + 14.f * u, top + 7.f * u, rect.right - 8.f * u, top + 31.f * u),
 				full ? 0xBBBBBB : 0x222222, false, true);
 			std::wstring sub = std::format(L"{} {} · {}", stat.count, Lang::get(L"punch.times"), ::Punch::fmtDuration(stat.seconds));
 			if (act.maxCount > 0) sub += std::format(L"  /  {} {} {}", Lang::get(L"punch.limit"), act.maxCount, Lang::get(L"punch.times"));
-			drawText(ctx, sub, 11.f, D2D1::RectF(left + 14.f * dpi, top + 30.f * dpi, rect.right - 8.f * dpi, top + 50.f * dpi),
+			drawText(ctx, sub, 11.f * k, D2D1::RectF(left + 14.f * u, top + 30.f * u, rect.right - 8.f * u, top + 50.f * u),
 				stat.overCount > 0 ? red : 0x999999, false, true);
 		}
-		y += ((acts.size() + 1) / 2) * (cellH + gap) + 2.f * dpi;
+		y += ((acts.size() + 1) / 2) * (cellH + gap) + 2.f * u;
 		bigBtn(L"out", Lang::get(L"punch.btnOut"), red, false, 40.f);
 	}
 
 	// —— 今日统计：每项活动的次数、总时长、超时 ——
-	const float bottom = h - 8.f * dpi;
-	y += 6.f * dpi;
-	if (y + 24.f * dpi > bottom) return;
-	drawText(ctx, Lang::get(L"punch.today") + L"   " + punch->getDay(), 12.f, D2D1::RectF(pad + 4.f * dpi, y, w - pad, y + 22.f * dpi), 0x999999, false, true);
-	y += 24.f * dpi;
-	const float colX[4]{ pad + 14.f * dpi, w * 0.40f, w * 0.56f, w * 0.78f };
+	const float bottom = h - 8.f * u;
+	y += 6.f * u;
+	if (y + 24.f * u > bottom) return;
+	drawText(ctx, Lang::get(L"punch.today") + L"   " + punch->getDay(), 12.f * k, D2D1::RectF(pad + 4.f * u, y, w - pad, y + 22.f * u), 0x999999, false, true);
+	y += 24.f * u;
+	const float colX[4]{ pad + 14.f * u, w * 0.40f, w * 0.56f, w * 0.78f };
 	auto tableRow = [&](const std::wstring& c0, const std::wstring& c1, const std::wstring& c2, const std::wstring& c3,
 		UINT rgb, UINT rgb3) {
-		if (y + 26.f * dpi > bottom) return;
-		drawText(ctx, c0, 12.f, D2D1::RectF(colX[0], y, colX[1], y + 26.f * dpi), rgb, false, true);
-		drawText(ctx, c1, 12.f, D2D1::RectF(colX[1], y, colX[2], y + 26.f * dpi), rgb, false, true);
-		drawText(ctx, c2, 12.f, D2D1::RectF(colX[2], y, colX[3], y + 26.f * dpi), rgb, false, true);
-		drawText(ctx, c3, 12.f, D2D1::RectF(colX[3], y, w - pad - 8.f * dpi, y + 26.f * dpi), rgb3, false, true);
-		y += 26.f * dpi;
+		if (y + 26.f * u > bottom) return;
+		drawText(ctx, c0, 12.f * k, D2D1::RectF(colX[0], y, colX[1], y + 26.f * u), rgb, false, true);
+		drawText(ctx, c1, 12.f * k, D2D1::RectF(colX[1], y, colX[2], y + 26.f * u), rgb, false, true);
+		drawText(ctx, c2, 12.f * k, D2D1::RectF(colX[2], y, colX[3], y + 26.f * u), rgb, false, true);
+		drawText(ctx, c3, 12.f * k, D2D1::RectF(colX[3], y, w - pad - 8.f * u, y + 26.f * u), rgb3, false, true);
+		y += 26.f * u;
 	};
 	const int rowCount = (int)punch->getActivities().size() + 2;
-	auto table = D2D1::RectF(pad, y, w - pad, (std::min)(bottom, y + rowCount * 26.f * dpi + 8.f * dpi));
+	auto table = D2D1::RectF(pad, y, w - pad, (std::min)(bottom, y + rowCount * 26.f * u + 8.f * u));
 	fillRound(table, 8.f, 0xFFFFFF);
 	strokeRound(table, 8.f, 0xE3E3E5);
-	y += 4.f * dpi;
+	y += 4.f * u;
 	tableRow(Lang::get(L"punch.colAct"), Lang::get(L"punch.colCount"), Lang::get(L"punch.colTime"), Lang::get(L"punch.colOver"), 0x999999, 0x999999);
 	auto overText = [&](const Punch::Stat& stat) {
 		return stat.overCount > 0 ? std::format(L"{}（{} {}）", ::Punch::fmtDuration(stat.overSeconds), stat.overCount, Lang::get(L"punch.times")) : std::wstring{ L"——" };
@@ -980,12 +984,12 @@ void WinClip::paintPunch(ID2D1DeviceContext* ctx)
 	auto total = punch->getTotal();
 	tableRow(Lang::get(L"punch.total"), std::to_wstring(total.count), ::Punch::fmtDuration(total.seconds), overText(total),
 		0x222222, total.overCount > 0 ? red : 0x999999);
-	y = table.bottom + 12.f * dpi;
+	y = table.bottom + 12.f * u;
 
 	// —— 今日记录：新的在上面，画到窗口底为止 ——
-	if (y + 24.f * dpi > bottom) return;
-	drawText(ctx, Lang::get(L"punch.log"), 12.f, D2D1::RectF(pad + 4.f * dpi, y, w - pad, y + 22.f * dpi), 0x999999, false, true);
-	y += 24.f * dpi;
+	if (y + 24.f * u > bottom) return;
+	drawText(ctx, Lang::get(L"punch.log"), 12.f * k, D2D1::RectF(pad + 4.f * u, y, w - pad, y + 22.f * u), 0x999999, false, true);
+	y += 24.f * u;
 	// 把上下班和各次活动摊成一条条带时间的记录
 	struct LogLine {
 		long long time{ 0 };
@@ -1011,10 +1015,10 @@ void WinClip::paintPunch(ID2D1DeviceContext* ctx)
 	}
 	std::sort(logs.begin(), logs.end(), [](auto& a, auto& b) { return a.time > b.time; });
 	for (auto& log : logs) {
-		if (y + 24.f * dpi > bottom) break;
-		drawText(ctx, ::Punch::fmtClock(log.time), 12.f, D2D1::RectF(pad + 14.f * dpi, y, pad + 70.f * dpi, y + 24.f * dpi), 0x999999, false, true);
-		drawText(ctx, log.text, 12.f, D2D1::RectF(pad + 70.f * dpi, y, w - pad - 8.f * dpi, y + 24.f * dpi), log.rgb, false, true);
-		y += 24.f * dpi;
+		if (y + 24.f * u > bottom) break;
+		drawText(ctx, ::Punch::fmtClock(log.time), 12.f * k, D2D1::RectF(pad + 14.f * u, y, pad + 70.f * u, y + 24.f * u), 0x999999, false, true);
+		drawText(ctx, log.text, 12.f * k, D2D1::RectF(pad + 70.f * u, y, w - pad - 8.f * u, y + 24.f * u), log.rgb, false, true);
+		y += 24.f * u;
 	}
 }
 
