@@ -306,7 +306,7 @@ int Setting::getClipMode()
     auto common = configObj.GetNamedObject(L"common", nullptr);
     if (!common) return 0;
     auto val = static_cast<int>(common.GetNamedNumber(L"clipMode", 0));
-    return val >= 0 && val <= 2 ? val : 0;
+    return val >= 0 && val <= 3 ? val : 0;
 }
 
 void Setting::setClipMode(int val)

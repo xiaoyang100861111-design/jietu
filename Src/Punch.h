@@ -79,6 +79,10 @@ public:
 	// 打卡。action：in 上班 / out 下班 / start 开始一项活动（act 是活动 id）/ back 回座
 	void act(const std::wstring& action, const std::wstring& actId, Done done);
 
+	// 用打卡的团队身份（令牌）调服务端的其他接口，记账页用它。做完回到 UI 线程调 done：
+	// status 是 HTTP 状态码，没连上是 0（这时 text 是错误原因）
+	static void api(bool post, const std::wstring& path, const std::wstring& body,
+		std::function<void(int status, std::wstring text)> done);
 	// 现在的时间，按服务端的钟（本机时间不准也没关系）
 	long long now() const;
 	// 把秒数写成"1 小时 05 分"这种样子

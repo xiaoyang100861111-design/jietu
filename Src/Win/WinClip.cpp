@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <ctime>
+#include <format>
 #include "WinClip.h"
 #include "WinCap.h"
 #include "WinPhraseEdit.h"
@@ -14,12 +15,13 @@
 #include "../Punch.h"
 
 using Microsoft::WRL::ComPtr;
+using namespace winrt::Windows::Data::Json;
 
 namespace {
 	std::unique_ptr<WinClip> winClip;
 	constexpr UINT timerDock{ 1 }, timerToast{ 2 }, timerAnim{ 3 }, timerMoveEnd{ 4 }, timerPunch{ 5 };
-	constexpr float modeTabW{ 76.f };   //顶上每个页签的宽度（逻辑像素）
-	constexpr int modeCount{ 3 };
+	constexpr float modeTabW{ 66.f };   //顶上每个页签的宽度（逻辑像素）
+	constexpr int modeCount{ 4 };
 	constexpr int animSteps{ 9 };   //滑动动画走几步，一步 15 毫秒
 	const wchar_t* clipTabKeys[5]{ L"clip.all", L"clip.text", L"clip.image", L"clip.files", L"clip.pinned" };
 
@@ -410,6 +412,7 @@ void WinClip::onCreated()
 		setTimer(1000, timerPunch);
 		if (auto punch = ::Punch::get()) punch->refresh(); //面板一打开就向服务端要一次最新状态
 	}
+	if (mode == Ledger) loadLedgerGroups();
 	created = true;
 	// 这个定时器一直开着：记"面板之外谁在前台"（粘贴要粘回它那儿），贴边时顺便看光标移开没有
 	setTimer(200, timerDock);
@@ -442,7 +445,7 @@ void WinClip::setBoxText(const std::wstring& text)
 void WinClip::updatePlaceholder()
 {
 	if (!textBox) return;
-	textBox->setPlaceholder(Lang::get(input == Input::Search ? L"clip.search" : L"clip.inputGroup"));
+	textBox->setPlaceholder(Lang::get(mode == Ledger ? L"ledger.input" : input == Input::Search ? L"clip.search" : L"clip.inputGroup"));
 }
 
 void WinClip::onTextEdit(const std::wstring& text)
@@ -454,6 +457,10 @@ void WinClip::onTextEdit(const std::wstring& text)
 		if (c != L'\r' && c != L'\n') clean += c;
 	}
 	if (clean != text) setBoxText(clean);
+	if (mode == Ledger) {
+		ledgerInput = clean;   //这里的字是要发出去的指令，不是搜索词
+		return;
+	}
 	if (input != Input::Search) {
 		inputText = clean;
 		return;
@@ -469,7 +476,7 @@ void WinClip::onTextEdit(const std::wstring& text)
 void WinClip::onMinMaxInfo(MINMAXINFO* mmi)
 {
 	// 再小标签和按钮就挤不下了
-	mmi->ptMinTrackSize.x = (LONG)(390.f * dpi);
+	mmi->ptMinTrackSize.x = (LONG)(430.f * dpi);
 	mmi->ptMinTrackSize.y = (LONG)(260.f * dpi);
 }
 
@@ -492,6 +499,7 @@ LRESULT WinClip::onHitTest(const POINT pos)
 
 float WinClip::listTop() const
 {
+	if (mode == Ledger && ledgerTop > 0.f) return ledgerTop;
 	return (90.f + 28.f * tabRows) * dpi;
 }
 
@@ -550,6 +558,8 @@ void WinClip::setMode(int val)
 	else {
 		killTimer(timerPunch);
 	}
+	ledgerInput.clear();
+	if (mode == Ledger) loadLedgerGroups();
 	tab = 0;
 	selRow = 0;
 	scrollY = 0.f;
@@ -581,6 +591,22 @@ void WinClip::rebuild()
 	tabs.clear();
 	contentH = 0.f;
 	if (!history || mode == Work) return; //打卡页没有列表，整页由 paintPunch 画
+	if (mode == Ledger) {
+		// 记账页：一排标签是我所在的各个记账小组，下面的内容由 paintLedger 画
+		tabRows = 1;
+		float left = 10.f * dpi;
+		for (auto& g : lgroups) {
+			Tab item;
+			item.label = g.name;
+			item.full = std::to_wstring(g.id);
+			item.selected = g.id == lgroupId;
+			item.left = left;
+			item.right = left + textWidth(g.name, 13.f) + 22.f * dpi;
+			left = item.right;
+			tabs.push_back(std::move(item));
+		}
+		return;
+	}
 	// 选中的分组可能刚被删掉 / 改名了：从哪一级开始对不上，就把那一级往后的都丢掉
 	if (mode == Phrase) {
 		auto& groups = history->getGroups();
@@ -754,7 +780,7 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 	ctx->Clear(D2D1::ColorF(0xF7F7F8));
 	// 第一排：左边两个页签，右边几个小按钮，中间的空白可以拖着挪窗口
 	const float modeTop = 8.f * dpi, modeBottom = 38.f * dpi, modeW = modeTabW * dpi;
-	static const wchar_t* modeKeys[modeCount]{ L"punch.tab", L"clip.modePhrase", L"clip.modeClip" };
+	static const wchar_t* modeKeys[modeCount]{ L"punch.tab", L"ledger.tab", L"clip.modePhrase", L"clip.modeClip" };
 	for (int i = 0; i < modeCount; i++) {
 		auto rect = D2D1::RectF(pad + modeW * i, modeTop, pad + modeW * (i + 1), modeBottom);
 		const bool cur = i == mode;
@@ -820,6 +846,11 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 	brush->SetColor(D2D1::ColorF(0xE3E3E5));
 	ctx->FillRectangle(D2D1::RectF(0.f, tabBottom + 3.f * dpi, w, tabBottom + 3.f * dpi + dpi), brush.Get());
 
+	if (mode == Ledger) {
+		paintLedger(ctx);
+		paintToast(ctx);
+		return;
+	}
 	// 列表
 	const float top = listTop(), bottom = listBottom();
 	if (rows.empty()) {
@@ -1092,6 +1123,233 @@ void WinClip::paintPunch(ID2D1DeviceContext* ctx)
 	}
 }
 
+// ———————————————— 记账页 ————————————————
+
+void WinClip::loadLedgerGroups()
+{
+	auto punch = ::Punch::get();
+	if (!punch || !punch->isJoined()) {
+		ledgerLoaded = true;
+		lgroups.clear();
+		rebuild();
+		refresh();
+		return;
+	}
+	::Punch::api(false, L"/api/ledger/groups", L"", [](int status, std::wstring text) {
+		if (!winClip || winClip->closing) return;
+		auto self = winClip.get();
+		self->ledgerLoaded = true;
+		JsonArray arr{ nullptr };
+		if (status != 200 || !JsonArray::TryParse(text, arr)) {
+			self->ledgerFailed = true;
+			self->ledgerText = Lang::get(L"punch.errNet");
+			self->refresh();
+			return;
+		}
+		self->lgroups.clear();
+		for (uint32_t i = 0; i < arr.Size(); i++) {
+			if (arr.GetAt(i).ValueType() != JsonValueType::Object) continue;
+			auto obj = arr.GetObjectAt(i);
+			LGroup g;
+			g.id = static_cast<long long>(obj.GetNamedNumber(L"id", 0));
+			g.name = std::wstring{ obj.GetNamedString(L"name", L"") };
+			g.role = std::wstring{ obj.GetNamedString(L"role", L"") };
+			g.allOperator = obj.GetNamedNumber(L"all_operator", 0) != 0;
+			if (g.id > 0) self->lgroups.push_back(std::move(g));
+		}
+		// 上次选的小组还在就接着用，不在了（被移出小组）就换成第一个
+		auto has = std::any_of(self->lgroups.begin(), self->lgroups.end(), [&](auto& g) { return g.id == self->lgroupId; });
+		if (!has) self->lgroupId = self->lgroups.empty() ? 0 : self->lgroups.front().id;
+		self->rebuild();
+		self->refresh();
+		if (self->lgroupId != 0 && self->mode == Ledger) self->loadLedgerBill(false);
+	});
+}
+
+void WinClip::loadLedgerBill(bool mine)
+{
+	if (lgroupId == 0) return;
+	auto path = std::format(L"/api/ledger/bill?groupId={}{}", lgroupId, mine ? L"&mine=true" : L"");
+	::Punch::api(false, path, L"", [](int status, std::wstring text) {
+		if (!winClip || winClip->closing) return;
+		auto self = winClip.get();
+		JsonObject obj{ nullptr };
+		if (status == 200 && JsonObject::TryParse(text, obj)) {
+			self->ledgerFailed = false;
+			self->ledgerText = std::wstring{ obj.GetNamedString(L"text", L"") };
+		}
+		else {
+			self->ledgerFailed = true;
+			self->ledgerText = status == 0 ? Lang::get(L"punch.errNet") : std::wstring{ obj ? obj.GetNamedString(L"error", L"") : L"" };
+		}
+		self->scrollY = 0.f;
+		self->refresh();
+	});
+}
+
+void WinClip::sendLedger(const std::wstring& raw)
+{
+	// 掐掉两头的空白
+	const auto from = raw.find_first_not_of(L" \t");
+	if (from == std::wstring::npos || ledgerBusy || lgroupId == 0) return;
+	const auto text = raw.substr(from, raw.find_last_not_of(L" \t") - from + 1);
+	// 一下子撤掉一大片的指令，发之前问一句
+	if ((text == L"删除今日账单" || text == L"删除全部账单") && !confirmOnce(Lang::get(L"ledger.confirmBulk") + L"\n\n" + text)) return;
+	ledgerBusy = true;
+	JsonObject body;
+	body.SetNamedValue(L"groupId", JsonValue::CreateNumberValue(static_cast<double>(lgroupId)));
+	body.SetNamedValue(L"text", JsonValue::CreateStringValue(text));
+	::Punch::api(true, L"/api/ledger/command", std::wstring{ body.Stringify() }, [](int status, std::wstring reply) {
+		if (!winClip || winClip->closing) return;
+		auto self = winClip.get();
+		self->ledgerBusy = false;
+		JsonObject obj{ nullptr };
+		if (status != 200 || !JsonObject::TryParse(reply, obj)) {
+			self->toast(status == 0 ? Lang::get(L"punch.errNet") : Lang::get(L"punch.errServer"), 4000, true);
+			self->refresh();
+			return;
+		}
+		const bool ok = obj.GetNamedBoolean(L"ok", false);
+		std::wstring text{ obj.GetNamedString(L"text", L"") };
+		if (!ok) {
+			// 没执行成（没权限、格式不对）：原来的账单留着，底下红字提示原因，输入框里的字也留着好改
+			self->toast(text, 4000, true);
+			self->refresh();
+			return;
+		}
+		self->ledgerFailed = false;
+		self->ledgerText = text;
+		self->scrollY = 0.f;
+		self->ledgerInput.clear();
+		self->setBoxText(L"");
+		self->toast(Lang::get(L"ledger.done"), 1000, false);
+		// 开关记账、全员记账这类指令会改变小组信息，顺手刷新一下
+		self->loadLedgerGroups();
+	});
+	refresh();
+}
+
+void WinClip::onLedgerClick(const std::wstring& id)
+{
+	if (id == L"join") {
+		setMode(Work);   //去打卡页填邀请码
+		return;
+	}
+	if (id == L"mine") {
+		loadLedgerBill(true);
+		return;
+	}
+	if (id == L"bill") {
+		loadLedgerBill(false);
+		return;
+	}
+	// 其余的按钮就是替用户发一条指令
+	if ((id == L"撤销入款" || id == L"撤销下发") && !confirmOnce(Lang::get(L"ledger.confirmUndo") + L"\n\n" + id)) return;
+	sendLedger(id);
+}
+
+void WinClip::paintLedger(ID2D1DeviceContext* ctx)
+{
+	punchBtns.clear();
+	const UINT theme = Setting::get()->getThemeColor();
+	const float pad = 10.f * dpi;
+	auto punch = ::Punch::get();
+	auto fillRound = [&](const D2D1_RECT_F& rect, float radius, UINT rgb, float alpha = 1.f) {
+		brush->SetColor(D2D1::ColorF(rgb, alpha));
+		ctx->FillRoundedRectangle(D2D1::RoundedRect(rect, radius * dpi, radius * dpi), brush.Get());
+	};
+	auto strokeRound = [&](const D2D1_RECT_F& rect, float radius, UINT rgb) {
+		brush->SetColor(D2D1::ColorF(rgb));
+		ctx->DrawRoundedRectangle(D2D1::RoundedRect(rect, radius * dpi, radius * dpi), brush.Get(), dpi);
+	};
+	auto addBtn = [&](const D2D1_RECT_F& rect, const std::wstring& id) {
+		punchBtns.push_back(PunchBtn{ rect, id, !ledgerBusy });
+		return !ledgerBusy && hover == Hit::PunchBtn && hoverIndex == (int)punchBtns.size() - 1;
+	};
+	float y = (90.f + 28.f * tabRows) * dpi;
+
+	// 还不能用的几种情况：没加入团队、还在取数据、没被分进任何小组
+	const bool joined = punch && punch->isJoined();
+	if (!joined || !ledgerLoaded || lgroups.empty()) {
+		ledgerTop = 0.f;
+		auto box = D2D1::RectF(pad, y, w - pad, y + 120.f * dpi);
+		fillRound(box, 10.f, 0xFFFFFF);
+		strokeRound(box, 10.f, 0xE3E3E5);
+		auto key = !joined ? L"ledger.needJoin" : !ledgerLoaded ? L"punch.loading" : L"ledger.noGroup";
+		drawText(ctx, Lang::get(key), 13.f, D2D1::RectF(box.left + 16.f * dpi, box.top, box.right - 16.f * dpi, box.bottom), 0x666666, true, true);
+		if (!joined) {
+			auto btn = D2D1::RectF(pad, box.bottom + 12.f * dpi, w - pad, box.bottom + 52.f * dpi);
+			const bool hot = addBtn(btn, L"join");
+			fillRound(btn, 8.f, theme, hot ? 0.85f : 1.f);
+			drawText(ctx, Lang::get(L"ledger.goJoin"), 14.f, btn, 0xFFFFFF, true, true);
+		}
+		return;
+	}
+
+	// 常用操作：一排小按钮，放不下就折到下一行。"账单""我的"是查看，其余等于替你发一条指令
+	const std::pair<const wchar_t*, const wchar_t*> quick[]{
+		{ L"bill", L"ledger.btnBill" }, { L"mine", L"ledger.btnMine" }, { L"撤销入款", nullptr }, { L"撤销下发", nullptr },
+		{ L"配置", nullptr }, { L"显示操作员", nullptr }, { L"帮助", nullptr },
+	};
+	float x = pad;
+	const float btnH = 28.f * dpi, gap = 6.f * dpi;
+	for (auto& [id, key] : quick) {
+		const std::wstring label = key ? Lang::get(key) : std::wstring{ id };
+		const float bw = textWidth(label, 12.f) + 20.f * dpi;
+		if (x + bw > w - pad) {
+			x = pad;
+			y += btnH + gap;
+		}
+		auto rect = D2D1::RectF(x, y, x + bw, y + btnH);
+		const bool hot = addBtn(rect, id);
+		const bool danger = std::wstring_view{ id }.starts_with(L"撤销");
+		fillRound(rect, 6.f, hot ? theme : 0xFFFFFF, hot ? 0.1f : 1.f);
+		strokeRound(rect, 6.f, hot ? theme : 0xE3E3E5);
+		drawText(ctx, label, 12.f, rect, danger ? 0xE64340 : 0x333333, true, true);
+		x += bw + gap;
+	}
+	y += btnH + 10.f * dpi;
+
+	// 我在这个小组里的身份
+	std::wstring roleKey = L"ledger.roleMember";
+	for (auto& g : lgroups) {
+		if (g.id != lgroupId) continue;
+		roleKey = g.role == L"owner" ? L"ledger.roleOwner" : g.role == L"operator" ? L"ledger.roleOperator"
+			: g.allOperator ? L"ledger.roleAll" : L"ledger.roleMember";
+	}
+	drawText(ctx, Lang::get(roleKey), 11.f, D2D1::RectF(pad + 4.f * dpi, y, w - pad, y + 20.f * dpi), 0x999999, false, true);
+	y += 24.f * dpi;
+
+	// 服务端回的账单 / 文字：一张卡片，内容长了用滚轮滚
+	ledgerTop = y;
+	const float bottom = listBottom();
+	auto card = D2D1::RectF(pad, y, w - pad, bottom);
+	if (card.bottom - card.top < 40.f * dpi) return;
+	fillRound(card, 10.f, 0xFFFFFF);
+	strokeRound(card, 10.f, 0xE3E3E5);
+	const float inner = 14.f * dpi;
+	const float textW = card.right - card.left - inner * 2.f;
+	auto layout = Ling::D2D::makeTextLayout(ledgerText.empty() ? Lang::get(L"ledger.empty") : ledgerText, 13.f * dpi, textW);
+	if (!layout) return;
+	layout->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, 22.f * dpi, 16.f * dpi);
+	DWRITE_TEXT_METRICS tm{};
+	layout->GetMetrics(&tm);
+	// 给滚动用：内容有多高（clampScroll 拿它和可见高度比）
+	contentH = tm.height + inner * 2.f;
+	clampScroll();
+	ctx->PushAxisAlignedClip(D2D1::RectF(card.left, card.top + 2.f * dpi, card.right, card.bottom - 2.f * dpi), D2D1_ANTIALIAS_MODE_ALIASED);
+	brush->SetColor(D2D1::ColorF(ledgerFailed ? 0xE64340 : 0x222222));
+	ctx->DrawTextLayout(D2D1::Point2F(card.left + inner, card.top + inner - scrollY), layout.Get(), brush.Get());
+	ctx->PopAxisAlignedClip();
+	const float viewH = card.bottom - card.top;
+	if (contentH > viewH) {
+		const float barH = (std::max)(24.f * dpi, viewH * viewH / contentH);
+		const float barY = card.top + (viewH - barH) * scrollY / (contentH - viewH);
+		brush->SetColor(D2D1::ColorF(0x000000, 0.22f));
+		ctx->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(w - 6.f * dpi - pad, barY, w - 3.f * dpi - pad, barY + barH), 1.5f * dpi, 1.5f * dpi), brush.Get());
+	}
+}
+
 void WinClip::onPunchClick(const std::wstring& id)
 {
 	auto punch = ::Punch::get();
@@ -1283,6 +1541,15 @@ WinClip::Hit WinClip::hitTest(POINT pos, int& index)
 		}
 		return Hit::None;
 	}
+	if (mode == Ledger) {
+		for (int i = 0; i < (int)punchBtns.size(); i++) {
+			if (punchBtns[i].enabled && inRect(punchBtns[i].rect)) {
+				index = i;
+				return Hit::PunchBtn;
+			}
+		}
+		return Hit::None;
+	}
 	if (py < listTop() || py >= listBottom()) return Hit::None;
 	const float contentY = py - listTop() + scrollY;
 	for (int i = 0; i < (int)rows.size(); i++) {
@@ -1334,12 +1601,26 @@ void WinClip::onDown(POINT pos, bool isRight)
 	auto history = ClipHistory::get();
 	if (!history) return;
 	if (hit == Hit::PunchBtn) {
-		if (!isRight) onPunchClick(std::wstring{ punchBtns[index].id }); //抄一份：下面一重画这张表就变了
+		// 抄一份 id：下面一重画这张表就变了
+		if (!isRight) {
+			const std::wstring id{ punchBtns[index].id };
+			if (mode == Ledger) onLedgerClick(id);
+			else onPunchClick(id);
+		}
 		return;
 	}
 	if (hit == Hit::Row) {
 		// 左右键都一样：复制到剪切板
 		activate(index, false);
+		return;
+	}
+	if (hit == Hit::Tab && mode == Ledger) {
+		// 换一个记账小组
+		if (isRight) return;
+		lgroupId = std::stoll(tabs[index].full);
+		scrollY = 0.f;
+		rebuild();
+		loadLedgerBill(false);
 		return;
 	}
 	if (hit == Hit::Tab && mode == Phrase) {
@@ -1385,7 +1666,7 @@ void WinClip::onDown(POINT pos, bool isRight)
 	else if (hit == Hit::Top3) {
 		WinPhraseEdit::open(curGroup());
 	}
-	else if (hit == Hit::Tab) {
+	else if (hit == Hit::Tab && mode == Clip) {
 		if (tab == index) return;
 		tab = index;
 		scrollY = 0.f;
@@ -1756,6 +2037,12 @@ void WinClip::onKey(UINT key)
 	}
 	if (mode == Work) {
 		if (key == VK_ESCAPE) requestClose();
+		return;
+	}
+	if (mode == Ledger) {
+		if (key == VK_ESCAPE) requestClose();
+		else if (key == VK_RETURN) sendLedger(ledgerInput);
+		else if (textBox && !textBox->isFocused()) textBox->focus();
 		return;
 	}
 	// 焦点不在文本框上（比如刚点过列表）时按了键：把焦点还给它，这样随时直接打字都是搜索。

@@ -13,9 +13,10 @@
 //   - 右上角的"固定"按下去之后：贴边的不再自己缩回去，用完一条话术面板也不关。
 class WinClip : public Ling::WinBase
 {
+	using ctx_t = ID2D1DeviceContext*;
 public:
 	// 三个页签。打卡排最前面（叫 Work 是为了不和 Punch 这个类重名）
-	enum Mode { Work = 0, Phrase = 1, Clip = 2 };
+	enum Mode { Work = 0, Ledger = 1, Phrase = 2, Clip = 3 };
 	~WinClip();
 	// 快捷键 / 托盘菜单：没开就按 mode 打开；开着且就是这个页签就关掉，是另一个页签就切过去
 	static void toggle(int mode);
@@ -71,6 +72,14 @@ private:
 	void paintToast(ID2D1DeviceContext* ctx);
 	// 点了打卡页上的某个按钮。id：in 上班 / out 下班 / back 回座 / act:<活动 id>
 	void onPunchClick(const std::wstring& id);
+	// —— 记账页 ——
+	// 页面内容：我所在的小组（标签）、常用操作按钮、服务端回的账单 / 文字
+	void paintLedger(ctx_t ctx);
+	void onLedgerClick(const std::wstring& id);
+	// 取我所在的记账小组；取当日账单；发一条指令（和原来在群里发消息一样）
+	void loadLedgerGroups();
+	void loadLedgerBill(bool mine);
+	void sendLedger(const std::wstring& text);
 	void drawText(ID2D1DeviceContext* ctx, const std::wstring& text, float fontSize, const D2D1_RECT_F& rect,
 		UINT rgb, bool hCenter = false, bool vCenter = false);
 	float textWidth(const std::wstring& text, float fontSize);
@@ -150,6 +159,18 @@ private:
 		bool enabled{ true };
 	};
 	std::vector<PunchBtn> punchBtns;
+	// 记账页的状态。小组和回复都是从服务端取的
+	struct LGroup {
+		long long id{ 0 };
+		std::wstring name, role;
+		bool allOperator{ false };
+	};
+	std::vector<LGroup> lgroups;
+	long long lgroupId{ 0 };
+	bool ledgerLoaded{ false }, ledgerBusy{ false }, ledgerFailed{ false };
+	std::wstring ledgerText;      // 服务端回的账单 / 文字，原样显示
+	std::wstring ledgerInput;     // 输入框里正在写的指令
+	float ledgerTop{ 0.f };       // 回复区域从哪儿开始（按钮排了几行不一定）
 	bool closing{ false };
 	// 正开着菜单 / 确认框 / 编辑窗口：这期间面板会失焦，但不能因此缩回去
 	bool modal{ false };

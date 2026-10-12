@@ -355,6 +355,12 @@ void Punch::act(const std::wstring& action, const std::wstring& actId, Done done
 	notify();
 }
 
+void Punch::api(bool post, const std::wstring& path, const std::wstring& body,
+	std::function<void(int status, std::wstring text)> done)
+{
+	send(post, path, body, punch ? punch->token : L"", done);
+}
+
 void CALLBACK Punch::onTimer(HWND, UINT, UINT_PTR, DWORD)
 {
 	if (punch) punch->tick();
