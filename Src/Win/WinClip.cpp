@@ -1741,9 +1741,16 @@ void WinClip::paintLedger(ID2D1DeviceContext* ctx)
 		{ L"bill", L"ledger.btnBill" }, { L"mine", L"ledger.btnMine" }, { L"撤销入款", nullptr }, { L"撤销下发", nullptr },
 		{ L"log", L"ledger.btnLog" }, { L"配置", nullptr }, { L"显示操作员", nullptr }, { L"帮助", nullptr },
 	};
+	// 只能看账的成员：记账、撤销都轮不到他，这几个按钮就不摆出来（"我的账单"是看自己记的，他也没有）
+	bool canWrite{ false };
+	for (auto& g : lgroups) {
+		if (g.id == lgroupId) canWrite = g.role == L"owner" || g.role == L"operator" || g.allOperator;
+	}
 	float x = pad;
 	const float btnH = 28.f * dpi, gap = 6.f * dpi;
 	for (auto& [id, key] : quick) {
+		const std::wstring_view idView{ id };
+		if (!canWrite && (idView == L"mine" || idView.starts_with(L"撤销"))) continue;
 		const std::wstring label = key ? Lang::get(key) : std::wstring{ id };
 		const float bw = textWidth(label, 12.f) + 20.f * dpi;
 		if (x + bw > w - pad) {
