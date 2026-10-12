@@ -16,7 +16,10 @@ class WinClip : public Ling::WinBase
 	using ctx_t = ID2D1DeviceContext*;
 public:
 	// 三个页签。打卡排最前面（叫 Work 是为了不和 Punch 这个类重名）
-	enum Mode { Work = 0, Ledger = 1, Phrase = 2, Clip = 3 };
+	// Settings 不是页签：点齿轮进去，整个面板换成设置内容（不记进配置，下次打开还是原来那一页）
+	enum Mode { Work = 0, Ledger = 1, Phrase = 2, Clip = 3, Settings = 4 };
+	// 把面板叫出来并显示设置（面板没开就开一个）。齿轮、托盘菜单的"设置"、设置页自己要重开时都走这里
+	static void openSettings();
 	~WinClip();
 	// 快捷键 / 托盘菜单：没开就按 mode 打开；开着且就是这个页签就关掉，是另一个页签就切过去
 	static void toggle(int mode);
@@ -72,6 +75,13 @@ private:
 	void paintToast(ID2D1DeviceContext* ctx);
 	// 点了打卡页上的某个按钮。id：in 上班 / out 下班 / back 回座 / act:<活动 id>
 	void onPunchClick(const std::wstring& id);
+	// —— 设置 ——
+	// 进 / 出设置。进去时面板不够宽就临时撑宽（设置的行比面板宽），出来时还原
+	void enterSettings();
+	void leaveSettings(int toMode);
+	// 换一页设置（通用 / 快捷键 / 关于 / 配置目录 / 账号）
+	void showSettingsPage(int index);
+	void refreshUpdateBtn();
 	// —— 记账页 ——
 	// 页面内容：我所在的小组（标签）、常用操作按钮、服务端回的账单 / 文字
 	void paintLedger(ctx_t ctx);
@@ -164,6 +174,16 @@ private:
 		bool enabled{ true };
 	};
 	std::vector<PunchBtn> punchBtns;
+	// 设置内容：盖在画布上面的一棵节点树（页签条、版本和更新那一行、当前这一页）
+	Ling::Node* setHost{ nullptr };
+	Ling::Node* setPage{ nullptr };
+	std::vector<Ling::Button*> setTabs;
+	Ling::Button* setUpdateBtn{ nullptr };
+	int prevMode{ Work };          // 进设置之前在哪一页，出来回到那儿
+	bool pendingSettings{ false }; // 面板还在滑进来，等它停稳了再进设置
+	bool adjusting{ false };       // 正在为设置撑宽 / 还原窗口：这次的大小、位置变化不是用户拖的
+	RECT normalRect{};             // 进设置之前窗口的位置和大小
+	bool hasNormalRect{ false };
 	// 记账页的状态。小组和回复都是从服务端取的
 	struct LGroup {
 		long long id{ 0 };

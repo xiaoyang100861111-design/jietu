@@ -10,6 +10,12 @@
 #include "WinPhraseEdit.h"
 #include "WinPunchJoin.h"
 #include "WinSetting.h"
+#include "WinSettingCommon.h"
+#include "WinSettingShortcut.h"
+#include "WinSettingAbout.h"
+#include "WinSettingData.h"
+#include "WinSettingAccount.h"
+#include "../Update.h"
 #include "../Lang.h"
 #include "../Setting.h"
 #include "../Punch.h"
@@ -19,6 +25,8 @@ using namespace winrt::Windows::Data::Json;
 
 namespace {
 	std::unique_ptr<WinClip> winClip;
+	// 设置上次停在哪一页。改语言、改主题色、登录退出都会把面板关掉重开，重开后还回到这一页
+	int settingsPage{ 0 };
 	// 把一段字放进系统剪切板
 	bool copyPlainText(HWND hwnd, const std::wstring& text)
 	{
@@ -193,6 +201,11 @@ WinClip::WinClip(HWND prevHwnd, int mode, int edge, bool byHotkey) : Ling::WinBa
 {
 	setTitle(L"UU截图");
 	auto setting = Setting::get();
+	if (this->mode == Settings) {
+		// 一开出来就要显示设置：先按平常的样子把面板建好，停稳了再切过去
+		pendingSettings = true;
+		this->mode = setting->getClipMode();
+	}
 	pinned = setting->getClipPinned();
 	path = splitPath(setting->getPhrasePath()); //上次停在哪个分组，这次还在那儿（分组没了的话 rebuild 会收掉）
 	POINT cursor{};
@@ -249,25 +262,33 @@ WinClip::WinClip(HWND prevHwnd, int mode, int edge, bool byHotkey) : Ling::WinBa
 	// 点到别处去了：贴边又没固定的缩回去；悬浮的、固定的都不动（那是个正常待着的窗口）。
 	// 菜单、确认框、编辑窗口开着时也会失焦，那不算
 	onBlur.add([this]() {
-		if (modal || closing) return;
+		// 设置里会弹调色板、下拉框，还要切到别处去复制东西回来粘，不因为失焦就缩回去
+		if (modal || closing || mode == Settings) return;
 		if (dockEdge != 0 && !pinned) requestClose();
 	});
 	// 拖边改了大小：列表能显示的行数变了，滚动位置要重新夹一下
 	onSizeChanged.add([this]() {
 		if (!created) return;
-		resized = true;
+		// 设置里的大小是临时的（撑宽过），不算用户调的面板大小
+		if (!adjusting && mode != Settings) resized = true;
 		if (textBox) textBox->setWidth(w / dpi - 28.f);
 		clampScroll();
 		refresh();
 	});
 	// 窗口挪动了。是用户在拖的话，等他松手（见 timerMoveEnd）再看停在了哪
 	onMoved.add([this]() {
-		if (!created || animating || closing) return;
+		if (!created || animating || closing || adjusting) return;
 		setTimer(200, timerMoveEnd);
 	});
 	// 同 WinSetting：窗口句柄已经没了，C++ 对象推迟到下一轮消息循环再放
 	onDestroy.add([this]() {
-		if (resized && dpi > 0.f) Setting::get()->setClipSize(w / dpi, h / dpi);
+		if (mode == Settings) {
+			Update::onStateChanged = nullptr;
+			// 在设置里关的：存进之前的大小，不存撑宽后的
+			if (resized && dpi > 0.f && hasNormalRect)
+				Setting::get()->setClipSize((normalRect.right - normalRect.left) / dpi, (normalRect.bottom - normalRect.top) / dpi);
+		}
+		else if (resized && dpi > 0.f) Setting::get()->setClipSize(w / dpi, h / dpi);
 		if (auto history = ClipHistory::get()) history->onChanged = nullptr;
 		if (auto punch = ::Punch::get()) punch->onChanged = nullptr;
 		Ling::App::get()->dq.TryEnqueue([]() { winClip.reset(); });
@@ -320,6 +341,19 @@ void WinClip::popup()
 	flash.uCount = 2;
 	flash.dwTimeout = 120;
 	FlashWindowEx(&flash);
+}
+
+void WinClip::openSettings()
+{
+	if (!winClip) {
+		if (!ClipHistory::get()) return;
+		auto prev = GetForegroundWindow();
+		winClip.reset(new WinClip(prev, Settings, Setting::get()->getDockEdge(), true));
+		return;
+	}
+	if (winClip->closing || !winClip->hwnd) return;
+	popup();
+	winClip->enterSettings();
 }
 
 void WinClip::showAtStartup()
@@ -450,6 +484,8 @@ void WinClip::onCreated()
 		// 鼠标顶边滑出来的不抢焦点：用户多半正在聊天窗口里打字，面板只是凑过来给他点一下
 		ShowWindow(hwnd, SW_SHOWNOACTIVATE);
 	}
+	// 要直接显示设置的：贴边的等滑进来停稳了再切（见 onTick），悬浮的现在就切
+	if (pendingSettings && !animating) enterSettings();
 }
 
 void WinClip::setBoxText(const std::wstring& text)
@@ -494,8 +530,8 @@ void WinClip::onTextEdit(const std::wstring& text)
 void WinClip::onMinMaxInfo(MINMAXINFO* mmi)
 {
 	// 再小标签和按钮就挤不下了
-	mmi->ptMinTrackSize.x = (LONG)(430.f * dpi);
-	mmi->ptMinTrackSize.y = (LONG)(260.f * dpi);
+	mmi->ptMinTrackSize.x = (LONG)((mode == Settings ? 480.f : 430.f) * dpi);
+	mmi->ptMinTrackSize.y = (LONG)((mode == Settings ? 420.f : 260.f) * dpi);
 }
 
 LRESULT WinClip::onHitTest(const POINT pos)
@@ -562,6 +598,13 @@ float WinClip::textWidth(const std::wstring& text, float fontSize)
 
 void WinClip::setMode(int val)
 {
+	if (mode == Settings) {
+		// 从设置里出来。要拆掉一棵节点树，这里多半还在鼠标事件的回调里，推到下一轮消息循环再拆
+		Ling::App::get()->dq.TryEnqueue([val]() {
+			if (winClip && !winClip->closing) winClip->leaveSettings(val);
+		});
+		return;
+	}
 	if (mode == val) return;
 	mode = val;
 	Setting::get()->setClipMode(mode);
@@ -822,7 +865,8 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 	// 固定：按下去是亮的（主题色、带底色）
 	topBtn(1, Hit::Top1, L"📌", 13.f, pinned ? theme : 0x999999, pinned);
 	// 设置：软件的设置窗口只从这里进
-	topBtn(2, Hit::Top2, L"⚙", 15.f, hover == Hit::Top2 ? 0x333333 : 0x999999, false);
+	topBtn(2, Hit::Top2, L"⚙", 15.f, mode == Settings ? theme : hover == Hit::Top2 ? 0x333333 : 0x999999, mode == Settings);
+	if (mode == Settings) return;   //下面整块是设置的内容（盖在画布上面的节点），画布上不用画
 	if (mode == Phrase) topBtn(3, Hit::Top3, L"＋", 16.f, theme, false);
 	if (mode == Work) {
 		paintPunch(ctx);
@@ -1035,8 +1079,8 @@ void WinClip::paintPunch(ID2D1DeviceContext* ctx)
 		bigBtn(L"in", Lang::get(state == Punch::State::Done ? L"punch.btnInAgain" : L"punch.btnIn"), green, true, 46.f);
 	}
 	else if (state == Punch::State::Away) {
+		// 活动中只有"回座"：得先回座才能下班
 		bigBtn(L"back", Lang::get(L"punch.btnBack"), theme, true, 50.f);
-		bigBtn(L"out", Lang::get(L"punch.btnOut"), red, false, 40.f);
 	}
 	else {
 		// 上班中：各项活动两列排开，每个按钮上写着今天用了几次、多久
@@ -1054,6 +1098,11 @@ void WinClip::paintPunch(ID2D1DeviceContext* ctx)
 			strokeRound(rect, 8.f, isHover ? theme : 0xE3E3E5);
 			drawText(ctx, act.name, 14.f * k, D2D1::RectF(left + 14.f * u, top + 7.f * u, rect.right - 8.f * u, top + 31.f * u),
 				full ? 0xBBBBBB : 0x222222, false, true);
+			// 名字后面写这项活动限多久：吃饭 30 分钟
+			const std::wstring limitText = act.limitMin > 0 ? std::format(L"{} {}", act.limitMin, Lang::get(L"punch.minute")) : Lang::get(L"punch.noLimit");
+			const float nameW = textWidth(act.name, 14.f * k);
+			drawText(ctx, limitText, 12.f * k, D2D1::RectF(left + 14.f * u + nameW + 8.f * u, top + 7.f * u, rect.right - 8.f * u, top + 31.f * u),
+				full ? 0xCCCCCC : theme, false, true);
 			std::wstring sub = std::format(L"{} {} · {}", stat.count, Lang::get(L"punch.times"), ::Punch::fmtDuration(stat.seconds));
 			if (act.maxCount > 0) sub += std::format(L"  /  {} {} {}", Lang::get(L"punch.limit"), act.maxCount, Lang::get(L"punch.times"));
 			drawText(ctx, sub, 11.f * k, D2D1::RectF(left + 14.f * u, top + 30.f * u, rect.right - 8.f * u, top + 50.f * u),
@@ -1139,6 +1188,187 @@ void WinClip::paintPunch(ID2D1DeviceContext* ctx)
 		drawText(ctx, log.text, 12.f * k, D2D1::RectF(pad + 70.f * u, y, w - pad - 8.f * u, y + 24.f * u), log.rgb, false, true);
 		y += 24.f * u;
 	}
+}
+
+// ———————————————— 设置 ————————————————
+
+void WinClip::enterSettings()
+{
+	if (mode == Settings || closing || !created) return;
+	if (animating) {
+		pendingSettings = true;   //还在滑进来，停稳了再说
+		return;
+	}
+	pendingSettings = false;
+	prevMode = mode;
+	mode = Settings;
+	killTimer(timerPunch);
+	input = Input::Search;
+	inputText.clear();
+	if (textBox) textBox->hide();
+
+	// 设置的行比面板宽：不够宽 / 不够高就临时撑开。贴右边、贴下边的，贴着的那条边不动
+	RECT rect{};
+	if (GetWindowRect(hwnd, &rect)) {
+		normalRect = rect;
+		hasNormalRect = true;
+		MONITORINFO mi{ sizeof(MONITORINFO) };
+		GetMonitorInfo(MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST), &mi);
+		auto& work = mi.rcWork;
+		const int curW = rect.right - rect.left, curH = rect.bottom - rect.top;
+		const int newW = (std::max)(curW, (std::min)((int)(500.f * dpi), (int)(work.right - work.left)));
+		const int newH = (std::max)(curH, (std::min)((int)(600.f * dpi), (int)(work.bottom - work.top)));
+		if (newW != curW || newH != curH) {
+			int left = dockEdge == 3 ? rect.right - newW : rect.left;
+			int top = dockEdge == 4 ? rect.bottom - newH : rect.top;
+			if (left + newW > work.right) left = work.right - newW;
+			if (top + newH > work.bottom) top = work.bottom - newH;
+			left = (std::max)(left, (int)work.left);
+			top = (std::max)(top, (int)work.top);
+			adjusting = true;
+			SetWindowPos(hwnd, nullptr, left, top, newW, newH, SWP_NOZORDER | SWP_NOACTIVATE);
+			adjusting = false;
+		}
+	}
+
+	// 一棵节点树盖在画布上：顶上那排（页签、齿轮、固定、关闭）还是画布画的，从它下面开始全是设置
+	setHost = body->makeChild<Ling::Node>();
+	setHost->setPositionType(Ling::Position::Absolute);
+	setHost->setPosition(Ling::Edge::Left, 0.f);
+	setHost->setPosition(Ling::Edge::Top, 42.f);
+	setHost->setPosition(Ling::Edge::Right, 0.f);
+	setHost->setPosition(Ling::Edge::Bottom, 0.f);
+	setHost->setBg(0xFAFAFAFF);
+	setHost->setFlexDirection(Ling::FlexDirection::Column);
+	// 页签条：通用 / 快捷键 / 关于 / 配置目录 / 账号
+	auto strip = setHost->makeChild<Ling::Node>();
+	strip->setHeight(38.f);
+	strip->setBg(0xEEEEF0FF);
+	strip->setFlexDirection(Ling::FlexDirection::Row);
+	strip->setAlignItems(Ling::Align::Center);
+	strip->setPadding(10.f, 0.f, 10.f, 0.f);
+	static const wchar_t* pageKeys[]{ L"setting.common", L"setting.shortcut", L"setting.about", L"setting.dataDir", L"setting.account" };
+	setTabs.clear();
+	for (int i = 0; i < 5; i++) {
+		auto tabBtn = strip->makeChild<Ling::Button>();
+		tabBtn->setText(Lang::get(pageKeys[i]));
+		tabBtn->setFontSize(13.f);
+		tabBtn->setHeight(28.f);
+		tabBtn->setFlexGrow(1.f);
+		tabBtn->onClick.add([i](Ling::Button*) {
+			// 换页要拆掉当前这一页的节点，推到下一轮消息循环再做
+			Ling::App::get()->dq.TryEnqueue([i]() {
+				if (winClip && !winClip->closing && winClip->mode == Settings) winClip->showSettingsPage(i);
+			});
+		});
+		setTabs.push_back(tabBtn);
+	}
+	// 版本号和有没有新版本：点右边那行字手动检查更新
+	auto status = setHost->makeChild<Ling::Node>();
+	status->setHeight(30.f);
+	status->setFlexDirection(Ling::FlexDirection::Row);
+	status->setAlignItems(Ling::Align::Center);
+	auto verLabel = status->makeChild<Ling::Label>();
+	verLabel->setText(std::format(L"UU截图   {} {}", Lang::get(L"about.version"), Update::version()));
+	verLabel->setHeightPercent(100.f);
+	verLabel->setJustifyContent(Ling::Justify::Center);
+	verLabel->setFlexGrow(1.f);
+	verLabel->setMarginLeft(16.f);
+	verLabel->setColor(0x888888FF);
+	verLabel->setFontSize(12.f);
+	setUpdateBtn = status->makeChild<Ling::Button>();
+	setUpdateBtn->setHeight(24.f);
+	setUpdateBtn->setFontSize(12.f);
+	setUpdateBtn->setMarginRight(12.f);
+	setUpdateBtn->setBg(0);
+	setUpdateBtn->setHoverBg(0);
+	setUpdateBtn->onClick.add([](Ling::Button*) { Update::checkNow(); });
+	refreshUpdateBtn();
+	Update::onStateChanged = []() {
+		if (winClip && !winClip->closing && winClip->mode == Settings) winClip->refreshUpdateBtn();
+	};
+	Update::checkQuiet();   //进设置时悄悄查一次，结果回来会刷新上面那行字
+
+	const int page = std::clamp(settingsPage, 0, 4);
+	settingsPage = -1;      //让下面这次一定会建页面
+	showSettingsPage(page);
+	// 录快捷键、敲色值都要键盘：把自己弄到前台
+	SetForegroundWindow(hwnd);
+	SetFocus(hwnd);
+	refresh();
+}
+
+void WinClip::showSettingsPage(int index)
+{
+	if (!setHost || index < 0 || index > 4 || (index == settingsPage && setPage)) return;
+	if (setPage) {
+		// 通用页的下拉框是挂在 body 上的，这一页没了它不会跟着走，先收掉
+		if (settingsPage == 0) static_cast<WinSettingCommon*>(setPage)->hideSelectBox();
+		setHost->removeChild(setPage);
+		setPage = nullptr;
+	}
+	settingsPage = index;
+	const uint32_t theme = (Setting::get()->getThemeColor() << 8) | 0xFF;
+	for (int i = 0; i < (int)setTabs.size(); i++) {
+		const bool cur = i == index;
+		setTabs[i]->setColor(cur ? 0xFFFFFFFF : 0x333333FF);
+		setTabs[i]->setBg(cur ? theme : 0x00000000);
+		setTabs[i]->setHoverColor(cur ? 0xFFFFFFFF : 0x000000FF);
+		setTabs[i]->setHoverBg(cur ? theme : 0xE1E1E3FF);
+	}
+	if (index == 0) setPage = setHost->makeChild<WinSettingCommon>();
+	else if (index == 1) setPage = setHost->makeChild<WinSettingShortcut>();
+	else if (index == 2) setPage = setHost->makeChild<WinSettingAbout>();
+	else if (index == 3) setPage = setHost->makeChild<WinSettingData>();
+	else setPage = setHost->makeChild<WinSettingAccount>();
+	setPage->setFlexGrow(1.f);
+	setPage->setPadding(20.f, 4.f, 20.f, 16.f);
+	setPage->setFlexDirection(Ling::FlexDirection::Column);
+	refresh();
+}
+
+void WinClip::refreshUpdateBtn()
+{
+	if (!setUpdateBtn) return;
+	const int state = Update::state();
+	std::wstring text = state == 2 ? std::format(L"{} {}  {}", Lang::get(L"update.found"), Update::latestVersion(), Lang::get(L"update.clickToUpdate"))
+		: state == 1 ? Lang::get(L"update.latest")
+		: state == 3 ? Lang::get(L"update.checkRetry")
+		: Lang::get(L"update.checking");
+	setUpdateBtn->setText(text);
+	// 按钮只有文字那么宽
+	setUpdateBtn->setWidth(textWidth(text, 12.f) / dpi + 16.f);
+	// 有新版本用红色，够显眼；其余是不起眼的灰色
+	setUpdateBtn->setColor(state == 2 ? 0xE64340FF : 0x888888FF);
+	setUpdateBtn->setHoverColor(state == 2 ? 0xC0392BFF : 0x555555FF);
+}
+
+void WinClip::leaveSettings(int toMode)
+{
+	if (mode != Settings) return;
+	Update::onStateChanged = nullptr;
+	if (setPage && settingsPage == 0) static_cast<WinSettingCommon*>(setPage)->hideSelectBox();
+	if (setHost) body->removeChild(setHost);
+	setHost = nullptr;
+	setPage = nullptr;
+	setUpdateBtn = nullptr;
+	setTabs.clear();
+	// 窗口还原成进来之前的大小；贴右边、贴下边的，贴着的那条边不动
+	RECT rect{};
+	if (hasNormalRect && GetWindowRect(hwnd, &rect)) {
+		const int oldW = normalRect.right - normalRect.left, oldH = normalRect.bottom - normalRect.top;
+		if (oldW != rect.right - rect.left || oldH != rect.bottom - rect.top) {
+			const int left = dockEdge == 3 ? rect.right - oldW : rect.left;
+			const int top = dockEdge == 4 ? rect.bottom - oldH : rect.top;
+			adjusting = true;
+			SetWindowPos(hwnd, nullptr, left, top, oldW, oldH, SWP_NOZORDER | SWP_NOACTIVATE);
+			adjusting = false;
+		}
+	}
+	hasNormalRect = false;
+	// 回到面板的某一页。先把 mode 挪开，setMode 才不会当成"没变"直接返回
+	mode = -1;
+	setMode(toMode >= Work && toMode <= Clip ? toMode : Work);
 }
 
 // ———————————————— 记账页 ————————————————
@@ -1744,6 +1974,9 @@ WinClip::Hit WinClip::hitTest(POINT pos, int& index)
 		}
 		return Hit::None;
 	}
+	if (mode == Settings) {
+		return Hit::None;   //设置内容自己收鼠标
+	}
 	if (mode == Work) {
 		for (int i = 0; i < (int)punchBtns.size(); i++) {
 			if (punchBtns[i].enabled && inRect(punchBtns[i].rect)) {
@@ -1823,6 +2056,7 @@ void WinClip::onDown(POINT pos, bool isRight)
 	if (closing) return;
 	int index{ -1 };
 	auto hit = hitTest(pos, index);
+	if (mode == Settings && hit == Hit::None) return;
 	auto history = ClipHistory::get();
 	if (!history) return;
 	if (hit == Hit::PunchBtn) {
@@ -1886,7 +2120,12 @@ void WinClip::onDown(POINT pos, bool isRight)
 		toast(Lang::get(pinned ? L"clip.pinOn" : L"clip.pinOff"));
 	}
 	else if (hit == Hit::Top2) {
-		WinSetting::init();
+		// 齿轮：进设置；已经在设置里就回到原来那一页。推到下一轮消息循环做（要建 / 拆节点）
+		Ling::App::get()->dq.TryEnqueue([]() {
+			if (!winClip || winClip->closing) return;
+			if (winClip->mode == Settings) winClip->leaveSettings(winClip->prevMode);
+			else winClip->enterSettings();
+		});
 	}
 	else if (hit == Hit::Top3) {
 		WinPhraseEdit::open(curGroup());
@@ -2029,6 +2268,7 @@ void WinClip::groupMenu(const std::wstring& full)
 
 void WinClip::onWheel(float space)
 {
+	if (mode == Settings) return;
 	// space > 0 是滚轮往上推，内容该往下走
 	scrollY -= space;
 	clampScroll();
@@ -2210,6 +2450,7 @@ void WinClip::onTick(UINT id)
 		if (t < 1.f) return;
 		killTimer(timerAnim);
 		animating = false;
+		if (!animOut && pendingSettings && !closing) enterSettings();
 		if (animOut) {
 			Ling::App::get()->dq.TryEnqueue([]() {
 				if (winClip && winClip->hwnd) winClip->close();
@@ -2224,8 +2465,8 @@ void WinClip::onTick(UINT id)
 		GetWindowThreadProcessId(fg, &pid);
 		if (pid != GetCurrentProcessId()) prevHwnd = fg;
 	}
-	// 下面是贴边面板的自动缩回：固定了的、悬浮的、正开着菜单 / 编辑窗口的都不缩
-	if (dockEdge == 0 || pinned || modal || animating) return;
+	// 下面是贴边面板的自动缩回：固定了的、悬浮的、正开着菜单 / 编辑窗口的、正在设置的都不缩
+	if (dockEdge == 0 || pinned || modal || animating || mode == Settings) return;
 	// 正按着鼠标（多半是在拖窗口、拖边改大小，光标会跑到窗口外面去）：不缩
 	if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) {
 		outTicks = 0;
@@ -2253,7 +2494,7 @@ void WinClip::onTick(UINT id)
 
 void WinClip::onKey(UINT key)
 {
-	if (closing) return;
+	if (closing || mode == Settings) return;   //设置里的键盘归设置页（录快捷键、敲色值）
 	if (input != Input::Search) {
 		// 正在输入分组名：回车确认，Esc 取消
 		if (key == VK_RETURN) endInput(true);

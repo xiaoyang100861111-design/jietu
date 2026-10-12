@@ -88,7 +88,6 @@ void App::dispose()
     keepAlive.reset();
     WinPin::dispose();
     WinCap::dispose();
-    WinSetting::dispose();
     WinPhraseEdit::dispose();
     WinPunchJoin::dispose();
     WinClip::dispose();

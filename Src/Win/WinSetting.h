@@ -1,28 +1,10 @@
 ﻿#pragma once
-#include <include/Ling.h>
 
-class WinSetting :public Ling::WinBase
+// 设置已经并进面板（WinClip）里了：点面板右上角的齿轮、托盘菜单的"设置"，都是在面板里显示设置内容，
+// 不再有单独的设置窗口。这个类只留一个入口，原来到处调的 WinSetting::init() 不用改
+class WinSetting
 {
 public:
-	~WinSetting();
+	// 把面板叫出来并切到设置（面板没开就开一个）
 	static void init();
-	// 设置窗口开着的话把它弄到最前面来（最小化了就还原），并闪两下提醒位置；没开就什么都不做。
-	// 点托盘图标时调：窗口常常被别的窗口盖住了、或者缩在任务栏里，用户找不到
-	static void raise();
-	// 退出流程里调：窗口对象是文件级静态变量，交给静态析构就在 CoUninitialize 之后了
-	static void dispose();
-private:
-	WinSetting();
-	void initMenuItems(Ling::Node* menuBox);
-	void onCreated() override;
-	void onMenuItemClick(Ling::Button* menu);
-	LRESULT onHitTest(const POINT pos) override;
-	// 顶上那条状态栏右边的字：有没有新版本。查到结果后刷新
-	void refreshUpdateBtn();
-private:
-	std::vector<Ling::Button*> menus;
-	int menuIndex{ 0 };
-	Ling::Node* content{nullptr};
-	Ling::Button* updateBtn{ nullptr };
 };
-

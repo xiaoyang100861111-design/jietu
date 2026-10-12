@@ -677,8 +677,8 @@ void Setting::initShortcutKeys()
         }
     });
     // 已经在运行时又双击了一次 exe：不截图（截图只走快捷键 / 托盘），
-    // 把设置窗口打开，让用户知道程序在托盘里待着
+    // 把面板叫出来，让用户知道程序在托盘里待着
     lingApp->onSecondInstance.add([this]() {
-        WinSetting::init();
+        WinClip::popup();
     });
 }
