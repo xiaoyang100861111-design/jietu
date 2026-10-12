@@ -585,7 +585,7 @@ void WinPin::onTextWorkDone(const Translate::Result& res, bool translate, D2D1_S
 	textWorking = false;
 	textWorkId = 0;
 	SetCursor(LoadCursor(nullptr, IDC_ARROW));
-	if (res.ok && translate && Translate::render((int)size.width, (int)size.height, pixels, res.blocks)) {
+	if (res.ok && translate && Translate::render((int)size.width, (int)size.height, pixels, res.blocks, Translate::langTitle(res))) {
 		// 与构造函数里拿外部像素建底图是同一套属性
 		D2D1_BITMAP_PROPERTIES1 props{};
 		props.pixelFormat = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);

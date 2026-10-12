@@ -772,7 +772,7 @@ void WinCap::startTextWork(bool translate)
 void WinCap::onTextWorkDone(const Translate::Result& res, bool translate, int cw, int ch, std::vector<BYTE>& pixels)
 {
     textWorking = false;
-    if (res.ok && translate && Translate::render(cw, ch, pixels, res.blocks)) {
+    if (res.ok && translate && Translate::render(cw, ch, pixels, res.blocks, Translate::langTitle(res))) {
         auto& maskRect = cutMask->maskRect;
         WinPin::initFromData(int(maskRect.left) + x, int(maskRect.top) + y, cw, ch, pixels);
         close();

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cwctype>
 #include <mutex>
 #include <unordered_map>
 #include <winrt/Windows.Foundation.h>
@@ -648,7 +649,7 @@ namespace {
 		return auth;
 	}
 
-	void msTranslate(const HttpClient& client, const std::wstring& target, std::vector<Translate::Block>& blocks)
+	void msTranslate(const HttpClient& client, const std::wstring& target, std::vector<Translate::Block>& blocks, std::wstring& srcLang)
 	{
 		auto auth = getBingAuth(client);
 		// 这个接口单次最多收一千字左右
@@ -666,13 +667,16 @@ namespace {
 			// 正常是个数组：[{"translations":[{"text":"…"}]}]。出错（要验证码、凭据过期）时是个对象
 			JsonArray arr{ nullptr };
 			if (!JsonArray::TryParse(text, arr) || arr.Size() == 0) fail(L"bing: " + text.substr(0, 160));
+			if (srcLang.empty()) {
+				if (auto det = arr.GetObjectAt(0).GetNamedObject(L"detectedLanguage", nullptr)) srcLang = std::wstring{ det.GetNamedString(L"language", L"") };
+			}
 			auto trans = arr.GetObjectAt(0).GetNamedArray(L"translations");
 			splitLines(std::wstring{ trans.GetObjectAt(0).GetNamedString(L"text") }, blocks, from, to);
 		}
 	}
 
 	// 腾讯交互翻译。它的语言代码是自己的一套
-	void tencentTranslate(const HttpClient& client, const std::wstring& target, std::vector<Translate::Block>& blocks)
+	void tencentTranslate(const HttpClient& client, const std::wstring& target, std::vector<Translate::Block>& blocks, std::wstring& srcLang)
 	{
 		std::wstring lang = target.starts_with(L"zh-Hant") ? L"zh-TW" : target.starts_with(L"zh") ? L"zh" : target;
 		GUID guid{};
@@ -706,6 +710,8 @@ namespace {
 			std::wstring text{ waitOp(resp.Content().ReadAsStringAsync(), 15) };
 			JsonObject obj{ nullptr };
 			if (!JsonObject::TryParse(text, obj)) fail(L"tencent: " + text.substr(0, 160));
+			if (srcLang.empty() && obj.HasKey(L"src_lang") && obj.GetNamedValue(L"src_lang").ValueType() == JsonValueType::String)
+				srcLang = std::wstring{ obj.GetNamedString(L"src_lang") };
 			auto arr = obj.GetNamedArray(L"auto_translation", nullptr);
 			if (!arr || arr.Size() != to - from) fail(L"tencent: " + text.substr(0, 160));
 			for (uint32_t i = 0; i < arr.Size(); i++) blocks[from + i].dst = std::wstring{ arr.GetStringAt(i) };
@@ -713,7 +719,7 @@ namespace {
 	}
 
 	// Google 的免密钥接口一次只收一段文本，所以把各段用换行连起来一起发，回来再按换行拆开
-	void googleTranslate(const HttpClient& client, const std::wstring& target, std::vector<Translate::Block>& blocks)
+	void googleTranslate(const HttpClient& client, const std::wstring& target, std::vector<Translate::Block>& blocks, std::wstring& srcLang)
 	{
 		std::wstring tl = target == L"zh-Hans" ? L"zh-CN" : target == L"zh-Hant" ? L"zh-TW" : target;
 		std::wstring joined;
@@ -727,7 +733,10 @@ namespace {
 		auto resp = waitOp(client.SendRequestAsync(req));
 		resp.EnsureSuccessStatusCode();
 		std::wstring text{ waitOp(resp.Content().ReadAsStringAsync()) };
-		auto segs = JsonArray::Parse(text).GetArrayAt(0);
+		auto root = JsonArray::Parse(text);
+		// 第三项是它认出来的原文语言
+		if (root.Size() > 2 && root.GetAt(2).ValueType() == JsonValueType::String) srcLang = std::wstring{ root.GetStringAt(2) };
+		auto segs = root.GetArrayAt(0);
 		std::wstring all;
 		for (uint32_t i = 0; i < segs.Size(); i++) {
 			auto seg = segs.GetAt(i);
@@ -749,7 +758,7 @@ namespace {
 
 	// engine：用户选的那一家（google / microsoft / tencent）先试，不通再挨个试另外两家。
 	// 全都不通就把每一家各自的错误原因带出去
-	void translate(const std::wstring& target, std::vector<Translate::Block>& blocks, const std::wstring& engine)
+	void translate(const std::wstring& target, std::vector<Translate::Block>& blocks, const std::wstring& engine, std::wstring& srcLang)
 	{
 		auto& client = sharedClient();
 		std::vector<std::wstring> order{ L"google", L"microsoft", L"tencent" };
@@ -757,9 +766,9 @@ namespace {
 		std::wstring detail;
 		for (auto& name : order) {
 			try {
-				if (name == L"google") googleTranslate(client, target, blocks);
-				else if (name == L"microsoft") msTranslate(client, target, blocks);
-				else tencentTranslate(client, target, blocks);
+				if (name == L"google") googleTranslate(client, target, blocks, srcLang);
+				else if (name == L"microsoft") msTranslate(client, target, blocks, srcLang);
+				else tencentTranslate(client, target, blocks, srcLang);
 				return;
 			}
 			catch (...) {
@@ -820,7 +829,14 @@ namespace {
 			result.text += block.src;
 		}
 		if (needTranslate) {
-			translate(pickTarget(opt.target, countChars(result.blocks)), result.blocks, opt.engine);
+			const auto stat = countChars(result.blocks);
+			result.dstLang = pickTarget(opt.target, stat);
+			translate(result.dstLang, result.blocks, opt.engine, result.srcLang);
+			// 接口没说原文是什么语言：按字形猜个大概（假名 → 日语，谚文 → 韩语，汉字 → 中文，拉丁字母 → 英语）
+			if (result.srcLang.empty() && stat.total() > 0) {
+				result.srcLang = stat.kana * 10 >= stat.total() ? L"ja" : stat.hangul * 2 > stat.total() ? L"ko"
+					: stat.han * 2 > stat.total() ? L"zh-CN" : stat.latin * 2 > stat.total() ? L"en" : L"";
+			}
 		}
 		result.ok = true;
 	}
@@ -930,7 +946,25 @@ void Translate::start(int w, int h, const std::vector<BYTE>& pixels, bool needTr
 
 // 离屏画：底图铺上去，每一段先拿底色把原文盖掉，再把译文写在原来的位置上。
 // 与 WinPin::getImagePixels 同一套做法（SetTarget → BeginDraw → EndDraw → SetTarget(nullptr) 闭环）
-bool Translate::render(int w, int h, std::vector<BYTE>& pixels, const std::vector<Block>& blocks)
+std::wstring Translate::langTitle(const Result& result)
+{
+	// 各家接口的语言代码写法不一样（zh-Hans / zh-CN / zh），先归成一种再去取名字；没收录的语言就显示代码本身
+	auto nameOf = [](std::wstring code) {
+		if (code.empty()) return Lang::get(L"langName.auto");
+		std::transform(code.begin(), code.end(), code.begin(), [](wchar_t c) { return (wchar_t)towlower(c); });
+		if (code == L"zh-hant" || code == L"zh-tw" || code == L"zh-hk" || code == L"cht") code = L"zh-TW";
+		else if (code.starts_with(L"zh")) code = L"zh-CN";
+		else if (code == L"iw") code = L"he";
+		else if (code == L"nb") code = L"no";
+		else if (auto pos = code.find(L'-'); pos != std::wstring::npos) code = code.substr(0, pos);
+		const auto key = L"langName." + code;
+		auto name = Lang::get(key);
+		return name == key ? code : name;
+	};
+	return nameOf(result.srcLang) + L" → " + nameOf(result.dstLang);
+}
+
+bool Translate::render(int w, int h, std::vector<BYTE>& pixels, const std::vector<Block>& blocks, const std::wstring& header)
 {
 	if (w <= 0 || h <= 0 || pixels.size() < (size_t)w * h * 4) return false;
 	auto d2d = Ling::D2D::get();
@@ -994,6 +1028,21 @@ bool Translate::render(int w, int h, std::vector<BYTE>& pixels, const std::vecto
 		// 比原来的盒子矮就竖直居中，高了就从顶上开始排
 		const float offsetY = tm.height < boxH ? (boxH - tm.height) / 2.f : 0.f;
 		ctx->DrawTextLayout(D2D1::Point2F(block.rect.left, block.rect.top + offsetY), layout.Get(), brush.Get());
+	}
+	// 最上面一行：从什么语言译成什么语言。红色粗体，垫一块白底，压在图的左上角
+	if (!header.empty()) {
+		const float fontSize = std::clamp((float)h * 0.045f, 13.f, 20.f);
+		if (auto layout = Ling::D2D::makeTextLayout(header, fontSize, (std::max)(40.f, (float)w - 8.f))) {
+			layout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_RANGE{ 0, (UINT32)header.size() });
+			layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+			DWRITE_TEXT_METRICS tm{};
+			layout->GetMetrics(&tm);
+			const float padX = fontSize * 0.5f, padY = fontSize * 0.2f;
+			brush->SetColor(D2D1::ColorF(0xFFFFFF, 0.92f));
+			ctx->FillRectangle(D2D1::RectF(0.f, 0.f, (std::min)((float)w, tm.width + padX * 2.f), tm.height + padY * 2.f), brush.Get());
+			brush->SetColor(D2D1::ColorF(0xE60012));
+			ctx->DrawTextLayout(D2D1::Point2F(padX, padY), layout.Get(), brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
+		}
 	}
 	hr = ctx->EndDraw();
 	// 解绑，下面 CopyFromBitmap 才能把它当 source 读
