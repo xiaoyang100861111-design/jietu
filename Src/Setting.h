@@ -45,6 +45,9 @@ public:
 	// 面板上次停在哪个页签（0 打卡 1 话术 2 剪切板）
 	int getClipMode();
 	void setClipMode(int val);
+	// 打卡：加入团队后服务端发的令牌。空 = 还没加入
+	std::wstring getPunchToken();
+	void setPunchToken(const std::wstring& token);
 	int getDockEdge();
 	void setDockEdge(int val);
 	int getMouseTrigger();

@@ -173,6 +173,7 @@
     <ClCompile Include="Punch.cpp" />
     <ClCompile Include="Win\WinClip.cpp" />
     <ClCompile Include="Win\WinPhraseEdit.cpp" />
+    <ClCompile Include="Win\WinPunchJoin.cpp" />
     <ClCompile Include="History.cpp" />
     <ClCompile Include="Lang.cpp" />
     <ClCompile Include="main.cpp" />
@@ -276,6 +277,7 @@
     <ClInclude Include="Punch.h" />
     <ClInclude Include="Win\WinClip.h" />
     <ClInclude Include="Win\WinPhraseEdit.h" />
+    <ClInclude Include="Win\WinPunchJoin.h" />
     <ClInclude Include="Tray.h" />
     <ClInclude Include="Update.h" />
     <ClInclude Include="Util.h" />

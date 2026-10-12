@@ -9,6 +9,7 @@
 #include "./Win/WinSetting.h"
 #include "./Win/WinClip.h"
 #include "./Win/WinPhraseEdit.h"
+#include "./Win/WinPunchJoin.h"
 #include "ClipHistory.h"
 #include "Punch.h"
 #include "Log.h"
@@ -87,6 +88,7 @@ void App::dispose()
     WinCap::dispose();
     WinSetting::dispose();
     WinPhraseEdit::dispose();
+    WinPunchJoin::dispose();
     WinClip::dispose();
     ClipHistory::dispose();
     Punch::dispose();

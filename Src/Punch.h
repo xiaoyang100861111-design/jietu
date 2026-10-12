@@ -1,14 +1,15 @@
 #pragma once
 #include <include/Ling.h>
-#include <filesystem>
 #include <functional>
 #include <string>
 #include <vector>
 
 // 打卡：上班 / 下班，以及上班期间的各项活动（吃饭、上厕所、抽烟、中途离岗……）和回座。
-// 现在是单机版：记录存在数据目录的 punch 文件夹里，一天一个文件。
-// 对外的接口按"将来要和服务端同步"来设计 —— 界面只跟这个类打交道，
-// 以后把记录上传、规则下发接进来时，界面不用动。
+// 数据全在服务端（https://dk.zx3777.com，和网页版打卡是同一套）：
+//   - 先用管理员给的邀请码加入团队，拿到一个令牌存在本机配置里；
+//   - 之后每次打卡都是向服务端提交，以服务端的时间为准，后台实时看得到；
+//   - 活动项、限时限次这些规则由管理后台下发。
+// 这个类手里只是服务端状态的一份缓存，隔一会儿刷新一次。
 // 所有成员只在 UI 线程上用。时间一律是毫秒时间戳（1970 年以来）。
 class Punch
 {
@@ -37,11 +38,22 @@ public:
 		long long overSeconds{ 0 };   // 一共超了多久
 	};
 	enum class State { Off, Working, Away, Done };   // 没上班 / 上班中 / 活动中 / 已下班
+	// 一次请求做完之后的回调：成没成，没成的话给用户看的原因
+	using Done = std::function<void(bool ok, const std::wstring& why)>;
 
 	~Punch();
 	static void init();
 	static void dispose();
 	static Punch* get();
+
+	// 加没加入团队（本机有没有令牌）
+	bool isJoined() const { return !token.empty(); }
+	// 加入了，并且已经从服务端拿到过一次状态
+	bool isLoaded() const { return loaded; }
+	// 正有一个请求在路上（这期间按钮不让再点）
+	bool isBusy() const { return busy; }
+	const std::wstring& getTeam() const { return team; }
+	const std::wstring& getName() const { return name; }
 
 	const std::vector<Activity>& getActivities() const { return activities; }
 	const Activity* findActivity(const std::wstring& id) const;
@@ -55,22 +67,26 @@ public:
 	long long workSeconds() const;         // 今天上班的总时长（含活动）
 	long long firstIn() const;             // 今天第一次上班的时间，没有返回 0
 	long long lastOut() const;             // 今天最后一次下班的时间
-	// 这一天是哪天（考勤日：按每日重置时间切，不按零点），如 2026-10-12
+	// 这一天是哪天（考勤日，由服务端按每日重置时间算），如 2026-10-12
 	std::wstring getDay() const { return day; }
 
-	// 下面四个动作，做不了时返回 false 并把原因放进 why（已经是给用户看的文案）
-	bool clockIn(std::wstring& why);
-	bool clockOut(std::wstring& why);
-	bool start(const std::wstring& act, std::wstring& why);
-	bool back(std::wstring& why);
+	// 用邀请码加入团队
+	void join(const std::wstring& code, const std::wstring& memberName, Done done);
+	// 退出团队：只是把本机的令牌丢掉，服务端的记录都还在；之后要重新填邀请码
+	void leave();
+	// 从服务端重新取一次状态（面板打开时、定时都会调）
+	void refresh();
+	// 打卡。action：in 上班 / out 下班 / start 开始一项活动（act 是活动 id）/ back 回座
+	void act(const std::wstring& action, const std::wstring& actId, Done done);
 
-	static long long now();
+	// 现在的时间，按服务端的钟（本机时间不准也没关系）
+	long long now() const;
 	// 把秒数写成"1 小时 05 分"这种样子
 	static std::wstring fmtDuration(long long seconds);
 	// 毫秒时间戳 → "14:57"
 	static std::wstring fmtClock(long long ms);
 public:
-	// 记录有变化（打了卡、换了一天）时调，界面靠它刷新
+	// 状态有变化（打了卡、刷新到了新数据、加入 / 退出了团队）时调，界面靠它重画
 	std::function<void()> onChanged;
 	// 活动超时了要提醒用户时调，参数是提醒的文案
 	std::function<void(const std::wstring&)> onOvertime;
@@ -78,21 +94,18 @@ private:
 	Punch();
 	static void CALLBACK onTimer(HWND, UINT, UINT_PTR, DWORD);
 	void tick();
-	// 考勤日变了（过了每日重置时间）且人不在班上：收掉旧的一天，换成新的一天
-	void rollDay();
-	std::wstring calcDay() const;
-	void loadConfig();
-	void load();
-	void save();
+	// 把服务端给的状态（JSON）装进来。格式不对返回 false
+	bool apply(const std::wstring& json);
+	// 服务端说令牌不认了（被管理员停用、删除）：丢掉令牌，回到"未加入"
+	void dropToken();
 	void notify();
 private:
-	std::filesystem::path dir;
+	std::wstring token, team, name, day, state;
 	std::vector<Activity> activities;
-	// 每日重置时间（几点）。夜班要跨零点，所以"一天"不按零点切。默认早上 6 点
-	int resetHour{ 6 };
-	std::wstring day;
 	std::vector<Segment> segments;
 	std::vector<Record> records;
+	bool loaded{ false }, busy{ false };
+	long long skew{ 0 };          // 服务端时间 - 本机时间
 	UINT_PTR timer{ 0 };
-	long long lastRemind{ 0 };   // 上次提醒超时是什么时候，免得刷屏
+	long long lastRemind{ 0 };    // 上次提醒超时是什么时候，免得刷屏
 };

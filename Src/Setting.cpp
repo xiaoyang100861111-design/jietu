@@ -316,6 +316,24 @@ void Setting::setClipMode(int val)
     save();
 }
 
+std::wstring Setting::getPunchToken()
+{
+    auto obj = configObj.GetNamedObject(L"punch", nullptr);
+    if (!obj) return L"";
+    return std::wstring{ obj.GetNamedString(L"token", L"") };
+}
+
+void Setting::setPunchToken(const std::wstring& token)
+{
+    auto obj = configObj.GetNamedObject(L"punch", nullptr);
+    if (!obj) {
+        obj = JsonObject();
+        configObj.SetNamedValue(L"punch", obj);
+    }
+    obj.SetNamedValue(L"token", JsonValue::CreateStringValue(token));
+    save();
+}
+
 int Setting::getDockEdge()
 {
     auto common = configObj.GetNamedObject(L"common", nullptr);

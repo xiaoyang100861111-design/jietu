@@ -7,6 +7,7 @@
 #include "WinClip.h"
 #include "WinCap.h"
 #include "WinPhraseEdit.h"
+#include "WinPunchJoin.h"
 #include "../Lang.h"
 #include "../Setting.h"
 #include "../Punch.h"
@@ -377,6 +378,7 @@ void WinClip::onCreated()
 	if (mode == Work) {
 		textBox->hide();
 		setTimer(1000, timerPunch);
+		if (auto punch = ::Punch::get()) punch->refresh(); //面板一打开就向服务端要一次最新状态
 	}
 	created = true;
 	// 这个定时器一直开着：记"面板之外谁在前台"（粘贴要粘回它那儿），贴边时顺便看光标移开没有
@@ -511,8 +513,13 @@ void WinClip::setMode(int val)
 		if (mode == Work) textBox->hide();
 		else textBox->show();
 	}
-	if (mode == Work) setTimer(1000, timerPunch);
-	else killTimer(timerPunch);
+	if (mode == Work) {
+		setTimer(1000, timerPunch);
+		if (auto punch = ::Punch::get()) punch->refresh();
+	}
+	else {
+		killTimer(timerPunch);
+	}
 	tab = 0;
 	selRow = 0;
 	scrollY = 0.f;
@@ -837,7 +844,7 @@ void WinClip::paintPunch(ID2D1DeviceContext* ctx)
 	const float pad = 10.f * dpi;
 	const auto state = punch->getState();
 	const auto cur = punch->current();
-	const auto nowMs = ::Punch::now();
+	const auto nowMs = punch->now();
 	auto fillRound = [&](const D2D1_RECT_F& rect, float radius, UINT rgb, float alpha = 1.f) {
 		brush->SetColor(D2D1::ColorF(rgb, alpha));
 		ctx->FillRoundedRectangle(D2D1::RoundedRect(rect, radius * u, radius * u), brush.Get());
@@ -848,9 +855,33 @@ void WinClip::paintPunch(ID2D1DeviceContext* ctx)
 	};
 	// 登记一个按钮，返回光标是不是正悬在它上面
 	auto addBtn = [&](const D2D1_RECT_F& rect, const std::wstring& id, bool enabled) {
-		punchBtns.push_back(PunchBtn{ rect, id, enabled });
-		return enabled && hover == Hit::PunchBtn && hoverIndex == (int)punchBtns.size() - 1;
+		// 有请求在路上时所有按钮都先不让点，免得连点两下打出两条
+		const bool usable = enabled && !punch->isBusy();
+		punchBtns.push_back(PunchBtn{ rect, id, usable });
+		return usable && hover == Hit::PunchBtn && hoverIndex == (int)punchBtns.size() - 1;
 	};
+
+	// 还没加入团队 / 加入了但还没连上服务端：整页就一张说明卡和一个按钮
+	if (!punch->isJoined() || !punch->isLoaded()) {
+		const bool joined = punch->isJoined();
+		auto box = D2D1::RectF(pad, 46.f * dpi, w - pad, 46.f * dpi + 130.f * u);
+		fillRound(box, 10.f, 0xFFFFFF);
+		strokeRound(box, 10.f, 0xE3E3E5);
+		drawText(ctx, Lang::get(joined ? L"punch.loading" : L"punch.notJoined"), 17.f * k,
+			D2D1::RectF(box.left, box.top + 22.f * u, box.right, box.top + 56.f * u), 0x222222, true, true);
+		drawText(ctx, Lang::get(joined ? L"punch.loadingTip" : L"punch.tipJoin"), 12.f * k,
+			D2D1::RectF(box.left + 16.f * u, box.top + 60.f * u, box.right - 16.f * u, box.bottom - 12.f * u), 0x666666, true, false);
+		auto btn = D2D1::RectF(pad, box.bottom + 12.f * u, w - pad, box.bottom + 58.f * u);
+		const bool isHover = addBtn(btn, joined ? L"retry" : L"join", !punch->isBusy());
+		fillRound(btn, 8.f, theme, isHover ? 0.85f : 1.f);
+		drawText(ctx, Lang::get(joined ? L"punch.btnRetry" : L"punch.btnJoin"), 15.f * k, btn, 0xFFFFFF, true, true);
+		if (joined) {
+			auto leave = D2D1::RectF(pad, btn.bottom + 10.f * u, w - pad, btn.bottom + 40.f * u);
+			const bool hot = addBtn(leave, L"leave", true);
+			drawText(ctx, Lang::get(L"punch.leave"), 12.f * k, leave, hot ? 0xE64340 : 0x999999, true, true);
+		}
+		return;
+	}
 
 	// —— 状态卡：现在是什么状态、计时、上班时间 ——
 	auto card = D2D1::RectF(pad, 46.f * dpi, w - pad, 46.f * dpi + 118.f * u);
@@ -952,7 +983,14 @@ void WinClip::paintPunch(ID2D1DeviceContext* ctx)
 	}
 
 	// —— 今日统计：每项活动的次数、总时长、超时 ——
-	const float bottom = h - 8.f * u;
+	// 最底下一行：属于哪个团队、登记的名字，右边是"退出团队"
+	const float footTop = h - 8.f * dpi - 24.f * u;
+	drawText(ctx, punch->getTeam() + L"  ·  " + punch->getName(), 11.f * k,
+		D2D1::RectF(pad + 4.f * u, footTop, w - pad - 90.f * u, footTop + 24.f * u), 0x999999, false, true);
+	auto leaveRect = D2D1::RectF(w - pad - 84.f * u, footTop, w - pad, footTop + 24.f * u);
+	const bool leaveHot = addBtn(leaveRect, L"leave", true);
+	drawText(ctx, Lang::get(L"punch.leave"), 11.f * k, leaveRect, leaveHot ? 0xE64340 : 0xBBBBBB, true, true);
+	const float bottom = footTop - 4.f * u;
 	y += 6.f * u;
 	if (y + 24.f * u > bottom) return;
 	drawText(ctx, Lang::get(L"punch.today") + L"   " + punch->getDay(), 12.f * k, D2D1::RectF(pad + 4.f * u, y, w - pad, y + 22.f * u), 0x999999, false, true);
@@ -1026,127 +1064,50 @@ void WinClip::onPunchClick(const std::wstring& id)
 {
 	auto punch = ::Punch::get();
 	if (!punch) return;
-	std::wstring why, done;
-	bool ok{ false };
+	if (id == L"join") {
+		WinPunchJoin::open();
+		return;
+	}
+	if (id == L"retry") {
+		punch->refresh();
+		return;
+	}
+	if (id == L"leave") {
+		// 退出只是这台电脑不再登录，后台的记录都还在；之后要重新填邀请码
+		if (confirmOnce(Lang::get(L"punch.confirmLeave"))) punch->leave();
+		return;
+	}
+	if (punch->isBusy()) return;
+	std::wstring action, actId, okText;
 	if (id == L"in") {
-		ok = punch->clockIn(why);
-		done = Lang::get(L"punch.okIn");
+		action = L"in";
+		okText = Lang::get(L"punch.okIn");
 	}
 	else if (id == L"out") {
 		// 下班点错了没法撤回，问一句
 		if (!confirmOnce(Lang::get(L"punch.confirmOut"))) return;
-		ok = punch->clockOut(why);
-		done = Lang::get(L"punch.okOut");
+		action = L"out";
+		okText = Lang::get(L"punch.okOut");
 	}
 	else if (id == L"back") {
-		ok = punch->back(why);
-		done = Lang::get(L"punch.okBack");
+		action = L"back";
+		okText = Lang::get(L"punch.okBack");
 	}
 	else if (id.starts_with(L"act:")) {
-		auto act = punch->findActivity(id.substr(4));
-		ok = punch->start(id.substr(4), why);
-		done = Lang::get(L"punch.okStart") + (act ? act->name : L"");
-	}
-	if (ok) toast(done, 1200, false);
-	else if (!why.empty()) toast(why, 2500, true);
-}
-
-void WinClip::paintRow(ID2D1DeviceContext* ctx, const Row& row, int index, float y)
-{
-	const UINT theme = Setting::get()->getThemeColor();
-	const float pad = 10.f * dpi;
-	auto& item = *row.item;
-	const bool isHover = hoverIndex == index && hover >= Hit::Row && hover <= Hit::Btn2;
-	if (index == selRow) {
-		brush->SetColor(D2D1::ColorF(theme, 0.12f));
-		ctx->FillRectangle(D2D1::RectF(0.f, y, w, y + row.height), brush.Get());
-	}
-	else if (isHover) {
-		brush->SetColor(D2D1::ColorF(0x000000, 0.05f));
-		ctx->FillRectangle(D2D1::RectF(0.f, y, w, y + row.height), brush.Get());
-	}
-	const float left = pad + 4.f * dpi;
-	const float right = btnRect(y, row.height, 2).left - 6.f * dpi; //右边留给三个小按钮
-	// 剪切板页每行底下有一行小字（复制的时间、字数 / 尺寸）；话术页不要这行，地方全让给备注和内容
-	const bool hasMeta = mode == Clip;
-	const float metaTop = y + row.height - (hasMeta ? 22.f : 7.f) * dpi;
-	auto mainRect = D2D1::RectF(left, y + 8.f * dpi, right, metaTop);
-	std::wstring meta = timeStr(item.id);
-	auto addMeta = [&meta](const std::wstring& part) {
-		if (part.empty()) return;
-		if (!meta.empty()) meta += L"   ";
-		meta += part;
-	};
-	// 有备注名的：第一行是备注（红字，一眼认出是哪条），内容在它下面；没有的话内容占满
-	auto drawMain = [&](const std::wstring& content) {
-		if (item.title.empty()) {
-			drawText(ctx, content, 13.f, mainRect, 0x222222);
-			return;
-		}
-		const float mid = mainRect.top + 20.f * dpi;
-		drawText(ctx, item.title, 13.f, D2D1::RectF(mainRect.left, mainRect.top, mainRect.right, mid), 0xE64340);
-		drawText(ctx, content, 13.f, D2D1::RectF(mainRect.left, mid, mainRect.right, mainRect.bottom), 0x222222);
-	};
-	if (item.type == ClipHistory::Type::Text) {
-		drawMain(preview(item.text, 200));
-		addMeta(std::format(L"{} {}", item.text.size(), Lang::get(L"clip.chars")));
-	}
-	else if (item.type == ClipHistory::Type::Files) {
-		// 只显示文件名，多个文件用逗号隔开；完整路径放在下面那行小字里
-		std::wstring names, first;
-		int count{ 0 };
-		size_t start{ 0 };
-		while (start <= item.text.size()) {
-			auto pos = item.text.find(L'\n', start);
-			auto file = item.text.substr(start, pos == std::wstring::npos ? pos : pos - start);
-			if (!file.empty()) {
-				if (count == 0) first = file;
-				if (count < 6) names += (names.empty() ? L"" : L"，") + fileName(file);
-				count++;
-			}
-			if (pos == std::wstring::npos) break;
-			start = pos + 1;
-		}
-		drawMain(L"📄 " + names);
-		addMeta(count > 1 ? std::format(L"{} {}", count, Lang::get(L"clip.fileCount")) : first);
+		action = L"start";
+		actId = id.substr(4);
+		auto rule = punch->findActivity(actId);
+		okText = Lang::get(L"punch.okStart") + (rule ? rule->name : L"");
 	}
 	else {
-		// 图片：有备注名的话备注占第一行（红字），缩略图摆在它下面
-		addMeta(std::format(L"{} × {}", item.imgW, item.imgH));
-		if (!item.title.empty()) {
-			const float mid = mainRect.top + 20.f * dpi;
-			drawText(ctx, item.title, 13.f, D2D1::RectF(mainRect.left, mainRect.top, mainRect.right, mid), 0xE64340);
-			mainRect.top = mid;
-		}
-		if (auto thumb = getThumb(item)) {
-			// 等比缩进主区域里，靠左摆
-			auto size = thumb->GetSize();
-			const float boxW = mainRect.right - mainRect.left, boxH = mainRect.bottom - mainRect.top;
-			const float scale = (std::min)({ boxW / size.width, boxH / size.height, 1.f });
-			auto dest = D2D1::RectF(mainRect.left, mainRect.top, mainRect.left + size.width * scale, mainRect.top + size.height * scale);
-			ctx->DrawBitmap(thumb, dest, 1.f, D2D1_INTERPOLATION_MODE_LINEAR);
-			brush->SetColor(D2D1::ColorF(0x000000, 0.12f));
-			ctx->DrawRectangle(dest, brush.Get(), 1.f);
-		}
+		return;
 	}
-	if (hasMeta) drawText(ctx, meta, 11.f, D2D1::RectF(left, metaTop, right, y + row.height - 4.f * dpi), 0x999999, false, true);
-	// 右边的小按钮，平时淡淡地显示，光标移上去才加深。
-	// 话术页：✕ 删除、✎ 编辑、⇄ 换分组；剪切板页：✕ 删除、☆ 收藏、＋ 存为话术
-	auto btnColor = [&](Hit which, UINT hoverRgb) -> UINT {
-		return isHover && hover == which ? hoverRgb : 0xBBBBBB;
-	};
-	drawText(ctx, L"✕", 12.f, btnRect(y, row.height, 0), btnColor(Hit::Btn0, 0xE64340), true, true);
-	if (mode == Phrase) {
-		drawText(ctx, L"✎", 14.f, btnRect(y, row.height, 1), btnColor(Hit::Btn1, 0x555555), true, true);
-		drawText(ctx, L"⇄", 14.f, btnRect(y, row.height, 2), btnColor(Hit::Btn2, theme), true, true);
-	}
-	else {
-		drawText(ctx, item.pinned ? L"★" : L"☆", 15.f, btnRect(y, row.height, 1),
-			item.pinned ? theme : btnColor(Hit::Btn1, 0x555555), true, true);
-		drawText(ctx, L"＋", 15.f, btnRect(y, row.height, 2), btnColor(Hit::Btn2, theme), true, true);
-	}
-	brush->SetColor(D2D1::ColorF(0xEBEBED));
-	ctx->FillRectangle(D2D1::RectF(pad, y + row.height - dpi, w - pad, y + row.height), brush.Get());
+	// 提交给服务端，结果回来再提示。回调来的时候面板可能已经关了，所以不捕获 this
+	punch->act(action, actId, [okText](bool ok, const std::wstring& why) {
+		if (!winClip || winClip->closing) return;
+		if (ok) winClip->toast(okText, 1200, false);
+		else winClip->toast(why, 4000, true);
+	});
 }
 
 WinClip::Hit WinClip::hitTest(POINT pos, int& index)
