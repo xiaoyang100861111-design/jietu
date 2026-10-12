@@ -16,6 +16,7 @@ namespace {
 	static constexpr UINT clipMsg = 167;
 	static constexpr UINT phraseMsg = 168;
 	static constexpr UINT punchMsg = 169;
+	static constexpr UINT ledgerMsg = 170;
 
 	void CALLBACK onDelayTimer(HWND, UINT, UINT_PTR id, DWORD)
 	{
@@ -29,10 +30,11 @@ Tray::Tray()
 	auto lingApp = Ling::App::get();
 	lingApp->initTray(100, L"UU截图");
 	Setting::get()->initShortcutKeys();
-	// 左键、右键点托盘图标都是把面板（打卡 / 话术 / 剪切板）叫出来。
-	// 设置窗口从面板右上角的齿轮进，退出软件在设置的"关于"页里
+	// 左键点托盘图标把面板（打卡 / 记账 / 话术 / 剪切板）叫出来；右键出菜单（截图、各个页面、设置、退出）
 	lingApp->onTrayMouseEvent.add([this](bool isDown, bool isRight) {
-		if (isDown) WinClip::popup();
+		if (!isDown) return;
+		if (isRight) onTrayRightClick();
+		else WinClip::popup();
 	});
 }
 
@@ -65,6 +67,7 @@ void Tray::onTrayRightClick()
 	AppendMenu(menu, MF_STRING, delayMsg, Lang::get(L"tray.delay").data());
 	AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
 	AppendMenu(menu, MF_STRING, punchMsg, Lang::get(L"tray.punch").data());
+	AppendMenu(menu, MF_STRING, ledgerMsg, Lang::get(L"ledger.tab").data());
 	AppendMenu(menu, MF_STRING, phraseMsg, Lang::get(L"tray.phrase").data());
 	AppendMenu(menu, MF_STRING, clipMsg, Lang::get(L"tray.clip").data());
 	AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
@@ -86,6 +89,10 @@ void Tray::onTrayRightClick()
 	else if (menuId == punchMsg)
 	{
 		WinClip::toggle(WinClip::Work);
+	}
+	else if (menuId == ledgerMsg)
+	{
+		WinClip::toggle(WinClip::Ledger);
 	}
 	else if (menuId == phraseMsg)
 	{
