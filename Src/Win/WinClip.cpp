@@ -19,6 +19,24 @@ using namespace winrt::Windows::Data::Json;
 
 namespace {
 	std::unique_ptr<WinClip> winClip;
+	// 把一段字放进系统剪切板
+	bool copyPlainText(HWND hwnd, const std::wstring& text)
+	{
+		if (!OpenClipboard(hwnd)) return false;
+		EmptyClipboard();
+		const size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+		bool ok{ false };
+		if (HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, bytes)) {
+			if (auto dst = GlobalLock(mem)) {
+				memcpy(dst, text.c_str(), bytes);
+				GlobalUnlock(mem);
+				ok = SetClipboardData(CF_UNICODETEXT, mem) != nullptr;
+			}
+			if (!ok) GlobalFree(mem);
+		}
+		CloseClipboard();
+		return ok;
+	}
 	constexpr UINT timerDock{ 1 }, timerToast{ 2 }, timerAnim{ 3 }, timerMoveEnd{ 4 }, timerPunch{ 5 };
 	constexpr float modeTabW{ 66.f };   //顶上每个页签的宽度（逻辑像素）
 	constexpr int modeCount{ 4 };
@@ -1177,14 +1195,200 @@ void WinClip::loadLedgerBill(bool mine)
 		if (status == 200 && JsonObject::TryParse(text, obj)) {
 			self->ledgerFailed = false;
 			self->ledgerText = std::wstring{ obj.GetNamedString(L"text", L"") };
+			self->ledgerHasBill = self->parseBill(obj);
 		}
 		else {
 			self->ledgerFailed = true;
+			self->ledgerHasBill = false;
 			self->ledgerText = status == 0 ? Lang::get(L"punch.errNet") : std::wstring{ obj ? obj.GetNamedString(L"error", L"") : L"" };
 		}
 		self->scrollY = 0.f;
 		self->refresh();
 	});
+}
+
+void WinClip::loadLedgerLog()
+{
+	if (lgroupId == 0) return;
+	::Punch::api(false, std::format(L"/api/ledger/log?groupId={}", lgroupId), L"", [](int status, std::wstring text) {
+		if (!winClip || winClip->closing) return;
+		auto self = winClip.get();
+		JsonObject obj{ nullptr };
+		const bool ok = status == 200 && JsonObject::TryParse(text, obj);
+		self->ledgerFailed = !ok;
+		self->ledgerHasBill = false;
+		self->ledgerText = ok ? std::wstring{ obj.GetNamedString(L"text", L"") } : Lang::get(status == 0 ? L"punch.errNet" : L"punch.errServer");
+		self->scrollY = 0.f;
+		self->refresh();
+	});
+}
+
+bool WinClip::parseBill(const JsonObject& obj)
+{
+	try {
+		LBill bill;
+		bill.title = std::wstring{ obj.GetNamedString(L"title", L"") };
+		bill.sub = std::wstring{ obj.GetNamedString(L"day", L"") } + L" · "
+			+ Lang::get(obj.GetNamedBoolean(L"mine", false) ? L"ledger.kindMine" : L"ledger.kindGroup");
+		bill.totalIn = std::wstring{ obj.GetNamedString(L"totalIn", L"0") };
+		bill.totalOut = std::wstring{ obj.GetNamedString(L"totalOut", L"0") };
+		bill.net = std::wstring{ obj.GetNamedString(L"net", L"0") };
+		bill.extra = std::wstring{ obj.GetNamedString(L"extra", L"") };
+		bill.inCount = static_cast<int>(obj.GetNamedNumber(L"inCount", 0));
+		bill.outCount = static_cast<int>(obj.GetNamedNumber(L"outCount", 0));
+		auto rowsOf = [&](const wchar_t* key, std::vector<LRow>& list) {
+			auto arr = obj.GetNamedArray(key);
+			for (uint32_t i = 0; i < arr.Size(); i++) {
+				auto item = arr.GetObjectAt(i);
+				LRow row;
+				row.id = std::to_wstring(static_cast<long long>(item.GetNamedNumber(L"id", 0)));
+				row.time = std::wstring{ item.GetNamedString(L"time", L"") };
+				row.amount = std::wstring{ item.GetNamedString(L"amount", L"") };
+				row.actor = std::wstring{ item.GetNamedString(L"actor", L"") };
+				row.line = std::wstring{ item.GetNamedString(L"line", L"") };
+				row.tag = std::wstring{ item.GetNamedString(L"tag", L"") };
+				row.rest = std::wstring{ item.GetNamedString(L"rest", L"") };
+				list.push_back(std::move(row));
+			}
+		};
+		rowsOf(L"incomes", bill.incomes);
+		rowsOf(L"expenses", bill.expenses);
+		lbill = std::move(bill);
+		return true;
+	}
+	catch (const winrt::hresult_error&) {
+		return false;   //格式和预想的不一样（比如服务端还是旧版）：退回去显示纯文字
+	}
+}
+
+void WinClip::paintBill(ID2D1DeviceContext* ctx, const D2D1_RECT_F& card)
+{
+	const float inner = 14.f * dpi, left = card.left + inner, right = card.right - inner;
+	const UINT green = 0x12A150, red = 0xE64340;
+	float y = card.top + inner - scrollY;
+	auto make = [&](const std::wstring& text, float size, bool bold) {
+		auto layout = Ling::D2D::makeTextLayout(text, size * dpi);
+		if (layout) {
+			layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+			if (bold) layout->SetFontWeight(DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_RANGE{ 0, (UINT32)text.size() });
+		}
+		return layout;
+	};
+	// 登记一块"点了就复制"的区域（露在卡片外面的部分不算）。返回鼠标是不是正停在上面
+	auto copyArea = [&](D2D1_RECT_F rect, const std::wstring& text) {
+		rect.top = (std::max)(rect.top, card.top);
+		rect.bottom = (std::min)(rect.bottom, card.bottom);
+		if (rect.bottom - rect.top < 6.f * dpi) return false;
+		punchBtns.push_back(PunchBtn{ rect, L"copy:" + text, true });
+		return hover == Hit::PunchBtn && hoverIndex == (int)punchBtns.size() - 1;
+	};
+	// 一行里的一小段：字、字号、颜色、粗细；copy 不空就能点了复制；chip 不为 0 就垫一块圆角底色
+	struct Piece {
+		std::wstring text;
+		float size;
+		UINT rgb;
+		bool bold;
+		std::wstring copy;
+		UINT chip;
+	};
+	// 在 (x, top) 画一段，返回占的宽度
+	auto drawPiece = [&](const Piece& piece, float x, float top, float lineH) {
+		auto layout = make(piece.text, piece.size, piece.bold);
+		if (!layout) return 0.f;
+		DWRITE_TEXT_METRICS tm{};
+		layout->GetMetrics(&tm);
+		const float padX = piece.chip ? 7.f * dpi : 0.f;
+		const float width = tm.widthIncludingTrailingWhitespace + padX * 2.f;
+		const float boxH = (std::min)(lineH - 6.f * dpi, tm.height + 4.f * dpi);
+		auto box = D2D1::RectF(x, top + (lineH - boxH) / 2.f, x + width, top + (lineH + boxH) / 2.f);
+		const bool hot = !piece.copy.empty() && copyArea(box, piece.copy);
+		if (piece.chip) {
+			brush->SetColor(D2D1::ColorF(piece.rgb, hot ? 0.24f : 0.12f));
+			ctx->FillRoundedRectangle(D2D1::RoundedRect(box, 5.f * dpi, 5.f * dpi), brush.Get());
+		}
+		brush->SetColor(D2D1::ColorF(piece.rgb));
+		ctx->DrawTextLayout(D2D1::Point2F(x + padX, top + (lineH - tm.height) / 2.f), layout.Get(), brush.Get());
+		if (hot && !piece.chip) ctx->DrawLine(D2D1::Point2F(x, box.bottom - 1.f * dpi), D2D1::Point2F(x + width, box.bottom - 1.f * dpi), brush.Get(), dpi);
+		return width;
+	};
+	auto widthOf = [&](const Piece& piece) {
+		auto layout = make(piece.text, piece.size, piece.bold);
+		if (!layout) return 0.f;
+		DWRITE_TEXT_METRICS tm{};
+		layout->GetMetrics(&tm);
+		return tm.widthIncludingTrailingWhitespace + (piece.chip ? 14.f * dpi : 0.f);
+	};
+	// 一行左边一段、右边一段
+	auto pair = [&](const Piece& a, const Piece& b, float lineH) {
+		drawPiece(a, left, y, lineH);
+		drawPiece(b, right - widthOf(b), y, lineH);
+		y += lineH;
+	};
+	auto hairline = [&](UINT rgb) {
+		brush->SetColor(D2D1::ColorF(rgb));
+		ctx->DrawLine(D2D1::Point2F(left, y), D2D1::Point2F(right, y), brush.Get(), dpi);
+	};
+
+	drawPiece({ lbill.title, 15.f, 0x222222, true, L"", 0 }, left, y, 24.f * dpi);
+	y += 24.f * dpi;
+	drawPiece({ lbill.sub, 12.f, 0x999999, false, L"", 0 }, left, y, 20.f * dpi);
+	y += 28.f * dpi;
+
+	auto section = [&](const std::wstring& name, UINT rgb, const std::vector<LRow>& list, int count,
+		const std::wstring& empty, const std::wstring& totalName, const std::wstring& total) {
+		pair({ name, 13.f, rgb, true, L"", 0 }, { std::format(L"{} {}", count, Lang::get(L"ledger.unit")), 12.f, 0x999999, false, L"", 0 }, 26.f * dpi);
+		hairline(0xEDEDEF);
+		if (list.empty()) {
+			drawPiece({ empty, 12.f, 0xAAAAAA, false, L"", 0 }, left, y, 30.f * dpi);
+			y += 30.f * dpi;
+		}
+		const float lineH = 30.f * dpi, gap = 8.f * dpi, indent = left + 44.f * dpi;
+		for (auto& row : list) {
+			std::vector<Piece> pieces{
+				{ row.time, 12.f, 0x999999, false, L"", 0 },
+				{ L"#" + row.id, 12.f, 0xAAAAAA, false, row.id, 0 },
+				{ row.amount, 15.f, rgb, true, row.amount, 0 },
+			};
+			if (!row.line.empty()) pieces.push_back({ row.line, 12.f, 0x1F6FEB, false, row.line, 1 });
+			if (!row.tag.empty()) pieces.push_back({ row.tag, 12.f, 0xC76A00, true, row.tag, 1 });
+			if (!row.rest.empty()) pieces.push_back({ row.rest, 13.f, 0x444444, false, row.rest, 0 });
+			if (!row.actor.empty()) pieces.push_back({ row.actor, 12.f, 0x999999, false, L"", 0 });
+			// 从左往右排，排不下的折到下一行（缩进到时间后面）
+			float x = left;
+			for (auto& piece : pieces) {
+				if (x > indent && x + widthOf(piece) > right) {
+					x = indent;
+					y += lineH - 6.f * dpi;
+				}
+				x += drawPiece(piece, x, y, lineH) + gap;
+			}
+			y += lineH;
+			hairline(0xF3F3F4);
+		}
+		pair({ totalName, 12.f, 0x888888, false, L"", 0 }, { total, 14.f, rgb, true, total, 0 }, 30.f * dpi);
+		y += 10.f * dpi;
+	};
+	section(Lang::get(L"ledger.income"), green, lbill.incomes, lbill.inCount, Lang::get(L"ledger.noIncome"), Lang::get(L"ledger.totalIn"), lbill.totalIn);
+	section(Lang::get(L"ledger.expense"), red, lbill.expenses, lbill.outCount, Lang::get(L"ledger.noExpense"), Lang::get(L"ledger.totalOut"), lbill.totalOut);
+
+	hairline(0xE3E3E5);
+	y += 4.f * dpi;
+	const bool minus = lbill.net.starts_with(L"-");
+	pair({ Lang::get(L"ledger.net"), 14.f, 0x222222, true, L"", 0 }, { lbill.net, 19.f, minus ? red : green, true, lbill.net, 0 }, 36.f * dpi);
+
+	// 净收益下面的统计（线路明细、会员统计…）和提示：原样的文字，小一号
+	if (!lbill.extra.empty()) {
+		y += 8.f * dpi;
+		if (auto layout = Ling::D2D::makeTextLayout(lbill.extra, 12.f * dpi, right - left)) {
+			layout->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, 20.f * dpi, 15.f * dpi);
+			DWRITE_TEXT_METRICS tm{};
+			layout->GetMetrics(&tm);
+			brush->SetColor(D2D1::ColorF(0x666666));
+			ctx->DrawTextLayout(D2D1::Point2F(left, y), layout.Get(), brush.Get());
+			y += tm.height;
+		}
+	}
+	contentH = y + scrollY - card.top + inner;
 }
 
 void WinClip::sendLedger(const std::wstring& raw)
@@ -1219,10 +1423,15 @@ void WinClip::sendLedger(const std::wstring& raw)
 		}
 		self->ledgerFailed = false;
 		self->ledgerText = text;
+		// 回的是账单就按账单排版；账单前面那句话（"已撤销 #3 · 100"）放到底下提示
+		self->ledgerHasBill = obj.HasKey(L"bill") && obj.GetNamedValue(L"bill").ValueType() == JsonValueType::Object
+			&& self->parseBill(obj.GetNamedObject(L"bill"));
+		std::wstring head{ obj.GetNamedString(L"head", L"") };
 		self->scrollY = 0.f;
 		self->ledgerInput.clear();
 		self->setBoxText(L"");
-		self->toast(Lang::get(L"ledger.done"), 1000, false);
+		if (!head.empty()) self->toast(head, 2500, false);
+		else if (self->ledgerHasBill) self->toast(Lang::get(L"ledger.done"), 1000, false);
 		// 开关记账、全员记账这类指令会改变小组信息，顺手刷新一下
 		self->loadLedgerGroups();
 	});
@@ -1241,6 +1450,17 @@ void WinClip::onLedgerClick(const std::wstring& id)
 	}
 	if (id == L"bill") {
 		loadLedgerBill(false);
+		return;
+	}
+	if (id == L"log") {
+		loadLedgerLog();
+		return;
+	}
+	if (id.starts_with(L"copy:")) {
+		// 点了账单里的金额 / 线路 / 会员 ID / 备注 / 编号：复制它
+		const auto text = id.substr(5);
+		const bool ok = copyPlainText(hwnd, text);
+		toast(ok ? Lang::get(L"clip.copied") + L" " + text : Lang::get(L"clip.copyFailed"), 1200, !ok);
 		return;
 	}
 	// 其余的按钮就是替用户发一条指令
@@ -1289,7 +1509,7 @@ void WinClip::paintLedger(ID2D1DeviceContext* ctx)
 	// 常用操作：一排小按钮，放不下就折到下一行。"账单""我的"是查看，其余等于替你发一条指令
 	const std::pair<const wchar_t*, const wchar_t*> quick[]{
 		{ L"bill", L"ledger.btnBill" }, { L"mine", L"ledger.btnMine" }, { L"撤销入款", nullptr }, { L"撤销下发", nullptr },
-		{ L"配置", nullptr }, { L"显示操作员", nullptr }, { L"帮助", nullptr },
+		{ L"log", L"ledger.btnLog" }, { L"配置", nullptr }, { L"显示操作员", nullptr }, { L"帮助", nullptr },
 	};
 	float x = pad;
 	const float btnH = 28.f * dpi, gap = 6.f * dpi;
@@ -1327,20 +1547,25 @@ void WinClip::paintLedger(ID2D1DeviceContext* ctx)
 	if (card.bottom - card.top < 40.f * dpi) return;
 	fillRound(card, 10.f, 0xFFFFFF);
 	strokeRound(card, 10.f, 0xE3E3E5);
-	const float inner = 14.f * dpi;
-	const float textW = card.right - card.left - inner * 2.f;
-	auto layout = Ling::D2D::makeTextLayout(ledgerText.empty() ? Lang::get(L"ledger.empty") : ledgerText, 13.f * dpi, textW);
-	if (!layout) return;
-	layout->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, 22.f * dpi, 16.f * dpi);
-	DWRITE_TEXT_METRICS tm{};
-	layout->GetMetrics(&tm);
-	// 给滚动用：内容有多高（clampScroll 拿它和可见高度比）
-	contentH = tm.height + inner * 2.f;
-	clampScroll();
 	ctx->PushAxisAlignedClip(D2D1::RectF(card.left, card.top + 2.f * dpi, card.right, card.bottom - 2.f * dpi), D2D1_ANTIALIAS_MODE_ALIASED);
-	brush->SetColor(D2D1::ColorF(ledgerFailed ? 0xE64340 : 0x222222));
-	ctx->DrawTextLayout(D2D1::Point2F(card.left + inner, card.top + inner - scrollY), layout.Get(), brush.Get());
+	if (ledgerHasBill) {
+		paintBill(ctx, card);
+	}
+	else {
+		const float inner = 14.f * dpi;
+		const float textW = card.right - card.left - inner * 2.f;
+		if (auto layout = Ling::D2D::makeTextLayout(ledgerText.empty() ? Lang::get(L"ledger.empty") : ledgerText, 13.f * dpi, textW)) {
+			layout->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, 22.f * dpi, 16.f * dpi);
+			DWRITE_TEXT_METRICS tm{};
+			layout->GetMetrics(&tm);
+			contentH = tm.height + inner * 2.f;
+			brush->SetColor(D2D1::ColorF(ledgerFailed ? 0xE64340 : 0x222222));
+			ctx->DrawTextLayout(D2D1::Point2F(card.left + inner, card.top + inner - scrollY), layout.Get(), brush.Get());
+		}
+	}
 	ctx->PopAxisAlignedClip();
+	// 内容有多高是画的时候才知道的：滚过头了就拉回来
+	clampScroll();
 	const float viewH = card.bottom - card.top;
 	if (contentH > viewH) {
 		const float barH = (std::max)(24.f * dpi, viewH * viewH / contentH);

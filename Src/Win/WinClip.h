@@ -79,6 +79,11 @@ private:
 	// 取我所在的记账小组；取当日账单；发一条指令（和原来在群里发消息一样）
 	void loadLedgerGroups();
 	void loadLedgerBill(bool mine);
+	void loadLedgerLog();
+	// 把服务端回的账单（JSON）拆进 lbill；拆不出来返回 false，这时按纯文字显示
+	bool parseBill(const winrt::Windows::Data::Json::JsonObject& obj);
+	// 账单自己排版：金额、线路、会员 ID 分开显示，点哪个复制哪个
+	void paintBill(ctx_t ctx, const D2D1_RECT_F& card);
 	void sendLedger(const std::wstring& text);
 	void drawText(ID2D1DeviceContext* ctx, const std::wstring& text, float fontSize, const D2D1_RECT_F& rect,
 		UINT rgb, bool hCenter = false, bool vCenter = false);
@@ -168,7 +173,18 @@ private:
 	std::vector<LGroup> lgroups;
 	long long lgroupId{ 0 };
 	bool ledgerLoaded{ false }, ledgerBusy{ false }, ledgerFailed{ false };
-	std::wstring ledgerText;      // 服务端回的账单 / 文字，原样显示
+	std::wstring ledgerText;      // 服务端回的文字（帮助、配置、日志这些），原样显示
+	// 账单的一笔 / 一整张。有账单时（ledgerHasBill）按它排版，不用上面那段文字
+	struct LRow {
+		std::wstring id, time, amount, actor, line, tag, rest;
+	};
+	struct LBill {
+		std::wstring title, sub, totalIn, totalOut, net, extra;
+		int inCount{ 0 }, outCount{ 0 };
+		std::vector<LRow> incomes, expenses;
+	};
+	LBill lbill;
+	bool ledgerHasBill{ false };
 	std::wstring ledgerInput;     // 输入框里正在写的指令
 	float ledgerTop{ 0.f };       // 回复区域从哪儿开始（按钮排了几行不一定）
 	bool closing{ false };
