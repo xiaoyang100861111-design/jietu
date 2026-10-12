@@ -14,7 +14,8 @@ public:
 	static void init(int x, int y, int w, int h);
 	// 底图不来自 WinCap 的截屏，而是外部给的一块 BGRA、top-down、行紧凑（步长 = w*4）像素。
 	// 滚动截图（WinLong）拼出来的长图走这条路进贴图窗口。
-	static void initFromData(int x, int y, int w, int h, std::vector<BYTE>& data);
+	// langTip 不空时在窗口外面上方挂一个小标签（截图翻译用："英语 → 简体中文"）
+	static void initFromData(int x, int y, int w, int h, std::vector<BYTE>& data, const std::wstring& langTip = L"");
 	// 当前屏幕上还有没有贴图窗口。用完即走模式靠它判断"活干完了没"：
 	// 截图窗口关掉时贴图窗口可能才刚建起来，那时候不能退进程
 	static bool hasWindow();
@@ -89,6 +90,10 @@ private:
 	// 缩放后窗口跟着改大小，并反向挪一下窗口位置，让 anchor 底下的那块图还停在原处
 	void applyScale(float newScale, POINT anchor);
 	void paintScaleTip(ID2D1DeviceContext* ctx);
+	// 译图的语言标签（"英语 → 简体中文"，红色粗体）：一个独立的小窗口，贴在图框外面上方居中，
+	// 跟着贴图窗口走。它不在图里，复制 / 保存出来的图上不会有它
+	void showLangTip(const std::wstring& text);
+	void layoutLangTip();
 private:
 	// 整个窗口内容都画在这块画布上，走 swap chain 后端：贴图窗口拖动 shape 时每帧重绘，
 	// 单缓冲的合成表面会被采样到"擦干净→逐个重画"的中间态，表现为 shape 和边框整帧闪掉。
@@ -101,6 +106,7 @@ private:
 	// 右上角的倍数提示。非空即显示，缩放停手一会儿由定时器清掉
 	Microsoft::WRL::ComPtr<IDWriteTextLayout> scaleTip;
 	Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushTipBg, brushTipText;
+	HWND langTip{ nullptr };
 	bool isMouseDown{ false }, isClosed{ false };
 	// 文字识别 / 翻译正在后台跑，以及这一次任务的编号（0 = 没有）。
 	// 结果回来时按编号找窗口，窗口已经关掉就找不到，结果直接丢弃

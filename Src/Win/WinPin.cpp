@@ -98,6 +98,10 @@ void WinPin::onClosed()
 	// history 随 WinPin 一起析构，留着悬空指针没意义
 	if (toolSub) toolSub->close();
 	if (toolMain) toolMain->close();
+	if (langTip) {
+		DestroyWindow(langTip);
+		langTip = nullptr;
+	}
 	shapeHover = nullptr;
 	editingText = nullptr;
 	// screenImg / canvas / history 都是成员（canvas 挂在 body 的子节点上），随下面这次 erase 一并释放
@@ -204,6 +208,7 @@ void WinPin::paintScaleTip(ID2D1DeviceContext* ctx)
 // 所以它那个朝上的小箭头在三种模式下都不需要翻转。
 void WinPin::layoutTools()
 {
+	layoutLangTip();
 	if (!toolMain || !toolSub) return;
 	// WinPin 的 hwnd 此时可能还没创建（本函数会在构造期调用），所以用矩形而不是窗口句柄找显示器。
 	RECT winRect{ x, y, x + static_cast<int>(w), y + static_cast<int>(h) };
@@ -257,12 +262,110 @@ void WinPin::init(int x, int y, int w, int h)
 	winPins.push_back(std::move(winPin));
 }
 
-void WinPin::initFromData(int x, int y, int w, int h, std::vector<BYTE>& data)
+void WinPin::initFromData(int x, int y, int w, int h, std::vector<BYTE>& data, const std::wstring& langTip)
 {
 	auto ptr = new WinPin(x, y, w, h, &data);
 	std::unique_ptr<WinPin> winPin{ ptr };
 	ptr->createNativeWindow(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_POPUP);
 	winPins.push_back(std::move(winPin));
+	ptr->showLangTip(langTip);
+}
+
+namespace {
+	// 语言标签窗口自己带着的东西：要写的字和字体，窗口销毁时一起放掉
+	struct LangTipData {
+		std::wstring text;
+		HFONT font{ nullptr };
+	};
+	LRESULT CALLBACK langTipProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+	{
+		auto data = reinterpret_cast<LangTipData*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+		if (msg == WM_PAINT) {
+			PAINTSTRUCT ps{};
+			auto dc = BeginPaint(hwnd, &ps);
+			RECT rc{};
+			GetClientRect(hwnd, &rc);
+			FillRect(dc, &rc, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
+			if (data) {
+				auto old = SelectObject(dc, data->font);
+				SetTextColor(dc, RGB(230, 0, 18));
+				SetBkMode(dc, TRANSPARENT);
+				DrawText(dc, data->text.c_str(), -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+				SelectObject(dc, old);
+			}
+			EndPaint(hwnd, &ps);
+			return 0;
+		}
+		if (msg == WM_NCHITTEST) return HTTRANSPARENT;   //只是个说明，鼠标点它等于点它底下的东西
+		if (msg == WM_NCDESTROY && data) {
+			SetWindowLongPtr(hwnd, GWLP_USERDATA, 0);
+			if (data->font) DeleteObject(data->font);
+			delete data;
+		}
+		return DefWindowProc(hwnd, msg, wp, lp);
+	}
+}
+
+void WinPin::showLangTip(const std::wstring& text)
+{
+	if (langTip) {
+		DestroyWindow(langTip);
+		langTip = nullptr;
+	}
+	if (text.empty() || !hwnd || isClosed) return;
+	static const wchar_t* className = L"UULangTip";
+	static bool registered{ false };
+	auto inst = GetModuleHandle(nullptr);
+	if (!registered) {
+		WNDCLASS wc{};
+		wc.lpfnWndProc = langTipProc;
+		wc.hInstance = inst;
+		wc.lpszClassName = className;
+		wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+		RegisterClass(&wc);
+		registered = true;
+	}
+	auto data = new LangTipData{ text };
+	data->font = CreateFont(-static_cast<int>(15.f * dpi), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Microsoft YaHei UI");
+	// 量一下字有多宽，窗口就开多大
+	SIZE size{};
+	auto dc = GetDC(hwnd);
+	auto old = SelectObject(dc, data->font);
+	GetTextExtentPoint32(dc, text.c_str(), static_cast<int>(text.size()), &size);
+	SelectObject(dc, old);
+	ReleaseDC(hwnd, dc);
+	const int tipW = size.cx + static_cast<int>(22.f * dpi), tipH = size.cy + static_cast<int>(10.f * dpi);
+	// 不抢焦点、不进任务栏；属主是贴图窗口，贴图窗口没了它也跟着没
+	langTip = CreateWindowEx(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, className, L"", WS_POPUP | WS_BORDER,
+		0, 0, tipW, tipH, hwnd, nullptr, inst, nullptr);
+	if (!langTip) {
+		if (data->font) DeleteObject(data->font);
+		delete data;
+		return;
+	}
+	SetWindowLongPtr(langTip, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(data));
+	layoutLangTip();
+	ShowWindow(langTip, SW_SHOWNOACTIVATE);
+}
+
+void WinPin::layoutLangTip()
+{
+	if (!langTip) return;
+	RECT tip{};
+	GetWindowRect(langTip, &tip);
+	const int tipW = tip.right - tip.left, tipH = tip.bottom - tip.top;
+	RECT winRect{ x, y, x + static_cast<int>(w), y + static_cast<int>(h) };
+	MONITORINFO mi{ .cbSize = sizeof(MONITORINFO) };
+	auto monitor = MonitorFromRect(&winRect, MONITOR_DEFAULTTONEAREST);
+	const int topLimit = monitor && GetMonitorInfo(monitor, &mi) ? mi.rcMonitor.top : 0;
+	const int gap = static_cast<int>(6.f * dpi);
+	// 图框外面、上方、左右居中。图已经顶到屏幕最上面、上方没地方了，才退到框里的顶上
+	//（那也是另一个窗口盖在上面，不会进到图里）
+	int tipY = winRect.top - gap - tipH;
+	if (tipY < topLimit) tipY = winRect.top + gap;
+	SetWindowPos(langTip, HWND_TOPMOST, winRect.left + (winRect.right - winRect.left - tipW) / 2, tipY, 0, 0,
+		SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 void WinPin::onCreated()
@@ -585,7 +688,8 @@ void WinPin::onTextWorkDone(const Translate::Result& res, bool translate, D2D1_S
 	textWorking = false;
 	textWorkId = 0;
 	SetCursor(LoadCursor(nullptr, IDC_ARROW));
-	if (res.ok && translate && Translate::render((int)size.width, (int)size.height, pixels, res.blocks, Translate::langTitle(res))) {
+	if (res.ok && translate && Translate::render((int)size.width, (int)size.height, pixels, res.blocks)) {
+		showLangTip(Translate::langTitle(res));
 		// 与构造函数里拿外部像素建底图是同一套属性
 		D2D1_BITMAP_PROPERTIES1 props{};
 		props.pixelFormat = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);

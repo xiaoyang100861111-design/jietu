@@ -964,7 +964,7 @@ std::wstring Translate::langTitle(const Result& result)
 	return nameOf(result.srcLang) + L" → " + nameOf(result.dstLang);
 }
 
-bool Translate::render(int w, int h, std::vector<BYTE>& pixels, const std::vector<Block>& blocks, const std::wstring& header)
+bool Translate::render(int w, int h, std::vector<BYTE>& pixels, const std::vector<Block>& blocks)
 {
 	if (w <= 0 || h <= 0 || pixels.size() < (size_t)w * h * 4) return false;
 	auto d2d = Ling::D2D::get();
@@ -1028,21 +1028,6 @@ bool Translate::render(int w, int h, std::vector<BYTE>& pixels, const std::vecto
 		// 比原来的盒子矮就竖直居中，高了就从顶上开始排
 		const float offsetY = tm.height < boxH ? (boxH - tm.height) / 2.f : 0.f;
 		ctx->DrawTextLayout(D2D1::Point2F(block.rect.left, block.rect.top + offsetY), layout.Get(), brush.Get());
-	}
-	// 最上面一行：从什么语言译成什么语言。红色粗体，垫一块白底，压在图的左上角
-	if (!header.empty()) {
-		const float fontSize = std::clamp((float)h * 0.045f, 13.f, 20.f);
-		if (auto layout = Ling::D2D::makeTextLayout(header, fontSize, (std::max)(40.f, (float)w - 8.f))) {
-			layout->SetFontWeight(DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_RANGE{ 0, (UINT32)header.size() });
-			layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-			DWRITE_TEXT_METRICS tm{};
-			layout->GetMetrics(&tm);
-			const float padX = fontSize * 0.5f, padY = fontSize * 0.2f;
-			brush->SetColor(D2D1::ColorF(0xFFFFFF, 0.92f));
-			ctx->FillRectangle(D2D1::RectF(0.f, 0.f, (std::min)((float)w, tm.width + padX * 2.f), tm.height + padY * 2.f), brush.Get());
-			brush->SetColor(D2D1::ColorF(0xE60012));
-			ctx->DrawTextLayout(D2D1::Point2F(padX, padY), layout.Get(), brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
-		}
 	}
 	hr = ctx->EndDraw();
 	// 解绑，下面 CopyFromBitmap 才能把它当 source 读

@@ -26,13 +26,12 @@ public:
 		// 从什么语言译成了什么语言（语言代码，如 ka / zh-CN）。原文语言是翻译接口认出来的，认不出就按字形猜
 		std::wstring srcLang, dstLang;
 	};
-	// "格鲁吉亚语 → 简体中文"：盖在译图顶上的那行说明。只能在 UI 线程调（要取界面文案）
+	// "格鲁吉亚语 → 简体中文"：贴图窗口上方那个小标签上的字（不画进图里）。只能在 UI 线程调（要取界面文案）
 	static std::wstring langTitle(const Result& result);
 	using Callback = std::function<void(std::shared_ptr<Result>)>;
 	// 必须在 UI 线程调。活在后台线程干，干完回到 UI 线程调 cb（无论成败都会调，且只调一次）。
 	// needTranslate 为 false 时只做文字识别，blocks 里的 dst 是空的
 	static void start(int w, int h, const std::vector<BYTE>& pixels, bool needTranslate, Callback cb);
 	// 把译文盖到 pixels 上（原地改）。要用 D2D 设备，只能在 UI 线程调
-	// header 不空时在图的最上面用红色粗体写一行（原文语言 → 译文语言）
-	static bool render(int w, int h, std::vector<BYTE>& pixels, const std::vector<Block>& blocks, const std::wstring& header = L"");
+	static bool render(int w, int h, std::vector<BYTE>& pixels, const std::vector<Block>& blocks);
 };
