@@ -263,14 +263,14 @@ WinClip::WinClip(HWND prevHwnd, int mode, int edge, bool byHotkey) : Ling::WinBa
 	// 菜单、确认框、编辑窗口开着时也会失焦，那不算
 	onBlur.add([this]() {
 		// 设置里会弹调色板、下拉框，还要切到别处去复制东西回来粘，不因为失焦就缩回去
-		if (modal || closing || mode == Settings) return;
+		if (modal || closing || this->mode == Settings) return;
 		if (dockEdge != 0 && !pinned) requestClose();
 	});
 	// 拖边改了大小：列表能显示的行数变了，滚动位置要重新夹一下
 	onSizeChanged.add([this]() {
 		if (!created) return;
 		// 设置里的大小是临时的（撑宽过），不算用户调的面板大小
-		if (!adjusting && mode != Settings) resized = true;
+		if (!adjusting && this->mode != Settings) resized = true;
 		if (textBox) textBox->setWidth(w / dpi - 28.f);
 		clampScroll();
 		refresh();
@@ -282,7 +282,7 @@ WinClip::WinClip(HWND prevHwnd, int mode, int edge, bool byHotkey) : Ling::WinBa
 	});
 	// 同 WinSetting：窗口句柄已经没了，C++ 对象推迟到下一轮消息循环再放
 	onDestroy.add([this]() {
-		if (mode == Settings) {
+		if (this->mode == Settings) {
 			Update::onStateChanged = nullptr;
 			// 在设置里关的：存进之前的大小，不存撑宽后的
 			if (resized && dpi > 0.f && hasNormalRect)
