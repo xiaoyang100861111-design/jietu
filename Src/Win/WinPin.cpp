@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "../MsgBox.h"
 #include "../Tool/ToolMain.h"
 #include "../Tool/ToolSub.h"
 #include "../Shape/ShapeBase.h"
@@ -710,14 +711,14 @@ void WinPin::onTextWorkDone(const Translate::Result& res, bool translate, D2D1_S
 	const UINT flags = MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND;
 	if (!res.ok || translate) {
 		auto msg = res.ok ? Lang::get(L"translate.failed") : res.err;
-		MessageBox(nullptr, msg.data(), title.data(), MB_OK | flags);
+		UUMessageBox(nullptr, msg.data(), title.data(), MB_OK | flags);
 		return;
 	}
 	// 文字太多时弹框会高出屏幕，只预览开头一段，写进剪切板的是全文
 	auto text = res.text;
 	auto preview = text.size() > 1200 ? text.substr(0, 1200) + L"…" : text;
 	auto tip = preview + L"\n\n" + Lang::get(L"cap.ocrCopy");
-	if (MessageBox(nullptr, tip.data(), title.data(), MB_OKCANCEL | flags) == IDOK) {
+	if (UUMessageBox(nullptr, tip.data(), title.data(), MB_OKCANCEL | flags) == IDOK) {
 		Ling::Util::setTextToClipboard(text);
 	}
 }

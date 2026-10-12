@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "../MsgBox.h"
 #include <include/Ling.h>
 #include "WinCap.h"
 #include "WinPin.h"
@@ -784,16 +785,16 @@ void WinCap::onTextWorkDone(const Translate::Result& res, bool translate, int cw
     auto title = Lang::get(L"about.sysTip");
     const UINT flags = MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND;
     if (!res.ok) {
-        MessageBox(nullptr, res.err.data(), title.data(), MB_OK | flags);
+        UUMessageBox(nullptr, res.err.data(), title.data(), MB_OK | flags);
     }
     else if (translate) {
-        MessageBox(nullptr, Lang::get(L"translate.failed").data(), title.data(), MB_OK | flags);
+        UUMessageBox(nullptr, Lang::get(L"translate.failed").data(), title.data(), MB_OK | flags);
     }
     else {
         // 文字太多时弹框会高出屏幕，只预览开头一段，写进剪切板的是全文
         auto preview = res.text.size() > 1200 ? res.text.substr(0, 1200) + L"…" : res.text;
         auto tip = preview + L"\n\n" + Lang::get(L"cap.ocrCopy");
-        if (MessageBox(nullptr, tip.data(), title.data(), MB_OKCANCEL | flags) == IDOK) {
+        if (UUMessageBox(nullptr, tip.data(), title.data(), MB_OKCANCEL | flags) == IDOK) {
             Ling::Util::setTextToClipboard(res.text);
         }
     }
@@ -813,11 +814,11 @@ void WinCap::startQrcode()
     if (toolCap) toolCap->hide();
     auto title = Lang::get(L"about.sysTip");
     if (text.empty()) {
-        MessageBox(nullptr, Lang::get(L"cap.qrcodeEmpty").data(), title.data(), MB_OK | MB_ICONINFORMATION);
+        UUMessageBox(nullptr, Lang::get(L"cap.qrcodeEmpty").data(), title.data(), MB_OK | MB_ICONINFORMATION);
     }
     else {
         auto tip = text + L"\n\n" + Lang::get(L"cap.qrcodeCopy");
-        if (MessageBox(nullptr, tip.data(), title.data(), MB_OKCANCEL | MB_ICONINFORMATION) == IDOK) {
+        if (UUMessageBox(nullptr, tip.data(), title.data(), MB_OKCANCEL | MB_ICONINFORMATION) == IDOK) {
             Ling::Util::setTextToClipboard(text);
         }
     }

@@ -169,6 +169,7 @@
   <ItemGroup>
     <ClCompile Include="App.cpp" />
     <ClCompile Include="Log.cpp" />
+    <ClCompile Include="MsgBox.cpp" />
     <ClCompile Include="ClipHistory.cpp" />
     <ClCompile Include="Punch.cpp" />
     <ClCompile Include="Sync.cpp" />
@@ -275,6 +276,8 @@
     <ClInclude Include="Tip.h" />
     <ClInclude Include="Translate.h" />
     <ClInclude Include="Log.h" />
+    <ClInclude Include="MsgBox.h" />
+    <ClInclude Include="Theme.h" />
     <ClInclude Include="ClipHistory.h" />
     <ClInclude Include="Punch.h" />
     <ClInclude Include="Sync.h" />

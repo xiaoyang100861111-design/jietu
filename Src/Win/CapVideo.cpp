@@ -1,4 +1,5 @@
 ﻿#include "pch.h"
+#include "../MsgBox.h"
 #include <include/Ling.h>
 #include "CapVideo.h"
 #include "WinCap.h"
@@ -21,7 +22,7 @@ namespace {
     // 录制界面的窗口是 WS_EX_TOPMOST 的，弹框得跟上，不然会被压在后面看不见
     void showRecordError(const std::wstring& text, const std::wstring& title)
     {
-        MessageBoxW(nullptr, text.data(), title.data(), MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND);
+        UUMessageBox(nullptr, text.data(), title.data(), MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND);
     }
 
     // 可能管着录制区域那块屏的 (适配器, 输出) 组合

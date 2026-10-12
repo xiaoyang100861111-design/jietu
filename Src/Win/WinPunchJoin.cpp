@@ -4,6 +4,7 @@
 #include "../Punch.h"
 #include "../Lang.h"
 #include "../Setting.h"
+#include "../Theme.h"
 
 namespace {
 	std::unique_ptr<WinPunchJoin> winJoin;
@@ -77,7 +78,7 @@ void WinPunchJoin::onCreated()
 {
 	enableShadow();
 	const uint32_t theme = (Setting::get()->getThemeColor() << 8) | 0xFF;
-	body->setBg(0xFAFAFAFF);
+	body->setBg(Theme::c(0xFAFAFAFF));
 	body->setFlexDirection(Ling::FlexDirection::Column);
 	body->setPadding(18.f, 8.f, 18.f, 16.f);
 
@@ -86,34 +87,39 @@ void WinPunchJoin::onCreated()
 	header->setFlexDirection(Ling::FlexDirection::Row);
 	header->setAlignItems(Ling::Align::Center);
 	auto caption = header->makeChild<Ling::Label>();
+	caption->setColor(Theme::t(0x333333FF));
 	caption->setText(Lang::get(L"punch.joinTitle"));
 	caption->setFontSize(15.f);
 	caption->setHeightPercent(100.f);
 	caption->setJustifyContent(Ling::Justify::Center);
 	caption->setFlexGrow(1.f);
 	auto closeBtn = header->makeChild<Ling::Button>();
+	closeBtn->setColor(Theme::t(0x333333FF));
+	closeBtn->setHoverColor(Theme::t(0x333333FF));
 	closeBtn->setSize(36.f, 28.f);
 	closeBtn->setText(L"\ue62d");
 	closeBtn->setFontFamily(L"icon");
-	closeBtn->setHoverColor(0xFFFFFFFF);
-	closeBtn->setHoverBg(0xE81123FF);
+	closeBtn->setHoverColor(Theme::t(0xFFFFFFFF));
+	closeBtn->setHoverBg(Theme::c(0xE81123FF));
 	closeBtn->onClick.add([](Ling::Button* btn) { btn->win->close(); });
 
 	auto makeLabel = [this](const std::wstring& text) {
 		auto label = body->makeChild<Ling::Label>();
+		label->setColor(Theme::t(0x333333FF));
 		label->setText(text);
 		label->setHeight(28.f);
 		label->setJustifyContent(Ling::Justify::Center);
-		label->setColor(0x666666FF);
+		label->setColor(Theme::t(0x666666FF));
 		return label;
 	};
 	auto makeBox = [this]() {
 		auto box = body->makeChild<Ling::TextBox>();
+		box->setColor(Theme::t(0x333333FF));
 		box->setWidthPercent(100.f);
 		box->setHeight(34.f);
 		box->setPadding(8.f, 2.f, 8.f, 2.f);
-		box->setBg(0xFFFFFFFF);
-		box->setBorder(1.f, 0xD9D9D9FF);
+		box->setBg(Theme::c(0xFFFFFFFF));
+		box->setBorder(1.f, Theme::c(0xD9D9D9FF));
 		box->setFontSize(14.f);
 		box->setVerticalCenter(true);
 		return box;
@@ -125,11 +131,12 @@ void WinPunchJoin::onCreated()
 
 	// 说明 / 出错原因
 	tipLabel = body->makeChild<Ling::Label>();
+	tipLabel->setColor(Theme::t(0x333333FF));
 	tipLabel->setText(Lang::get(L"punch.joinTip"));
 	tipLabel->setFlexGrow(1.f);
 	tipLabel->setJustifyContent(Ling::Justify::Center);
 	tipLabel->setFontSize(12.f);
-	tipLabel->setColor(0x999999FF);
+	tipLabel->setColor(Theme::t(0x999999FF));
 
 	auto footer = body->makeChild<Ling::Node>();
 	footer->setHeight(36.f);
@@ -138,20 +145,24 @@ void WinPunchJoin::onCreated()
 	auto spacer = footer->makeChild<Ling::Node>();
 	spacer->setFlexGrow(1.f);
 	auto cancelBtn = footer->makeChild<Ling::Button>();
+	cancelBtn->setColor(Theme::t(0x333333FF));
+	cancelBtn->setHoverColor(Theme::t(0x333333FF));
 	cancelBtn->setText(Lang::get(L"clip.editCancel"));
 	cancelBtn->setSize(88.f, 30.f);
-	cancelBtn->setBg(0xFFFFFFFF);
-	cancelBtn->setHoverBg(0xF2F2F2FF);
-	cancelBtn->setBorder(1.f, 0xD9D9D9FF);
+	cancelBtn->setBg(Theme::c(0xFFFFFFFF));
+	cancelBtn->setHoverBg(Theme::c(0xF2F2F2FF));
+	cancelBtn->setBorder(1.f, Theme::c(0xD9D9D9FF));
 	cancelBtn->onClick.add([](Ling::Button* btn) { btn->win->close(); });
 	auto okBtn = footer->makeChild<Ling::Button>();
+	okBtn->setColor(Theme::t(0x333333FF));
+	okBtn->setHoverColor(Theme::t(0x333333FF));
 	okBtn->setText(Lang::get(L"punch.joinBtn"));
 	okBtn->setSize(88.f, 30.f);
 	okBtn->setMarginLeft(10.f);
 	okBtn->setBg(theme);
 	okBtn->setHoverBg(theme);
-	okBtn->setColor(0xFFFFFFFF);
-	okBtn->setHoverColor(0xFFFFFFFF);
+	okBtn->setColor(Theme::t(0xFFFFFFFF));
+	okBtn->setHoverColor(Theme::t(0xFFFFFFFF));
 	okBtn->onClick.add([this](Ling::Button*) { submit(); });
 
 	show();
@@ -167,11 +178,11 @@ void WinPunchJoin::submit()
 	const auto code = oneLine(codeBox->getText());
 	const auto name = oneLine(nameBox->getText());
 	if (code.empty() || name.empty()) {
-		tipLabel->setColor(0xE64340FF);
+		tipLabel->setColor(Theme::t(0xE64340FF));
 		tipLabel->setText(Lang::get(L"punch.joinEmpty"));
 		return;
 	}
-	tipLabel->setColor(0x999999FF);
+	tipLabel->setColor(Theme::t(0x999999FF));
 	tipLabel->setText(Lang::get(L"punch.joining"));
 	// 回调来的时候窗口可能已经被关掉了，所以不捕获 this，回来再看 winJoin 还在不在
 	punch->join(code, name, [](bool ok, const std::wstring& why) {
@@ -180,7 +191,7 @@ void WinPunchJoin::submit()
 			winJoin->close();
 			return;
 		}
-		winJoin->tipLabel->setColor(0xE64340FF);
+		winJoin->tipLabel->setColor(Theme::t(0xE64340FF));
 		winJoin->tipLabel->setText(why);
 	});
 }

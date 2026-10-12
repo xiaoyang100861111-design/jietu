@@ -4,6 +4,7 @@
 #include "WinClip.h"
 #include "../Lang.h"
 #include "../Setting.h"
+#include "../Theme.h"
 
 namespace {
 	std::unique_ptr<WinPhraseEdit> winEdit;
@@ -110,7 +111,7 @@ void WinPhraseEdit::onCreated()
 	}
 	if (editing) type = editing->type;
 
-	body->setBg(0xFAFAFAFF);
+	body->setBg(Theme::c(0xFAFAFAFF));
 	body->setFlexDirection(Ling::FlexDirection::Column);
 	body->setPadding(18.f, 8.f, 18.f, 16.f);
 
@@ -120,32 +121,37 @@ void WinPhraseEdit::onCreated()
 	header->setFlexDirection(Ling::FlexDirection::Row);
 	header->setAlignItems(Ling::Align::Center);
 	auto caption = header->makeChild<Ling::Label>();
+	caption->setColor(Theme::t(0x333333FF));
 	caption->setText(Lang::get(editing ? L"clip.editTitleEdit" : L"clip.editTitleNew"));
 	caption->setFontSize(15.f);
 	caption->setHeightPercent(100.f);
 	caption->setJustifyContent(Ling::Justify::Center);
 	caption->setFlexGrow(1.f);
 	auto closeBtn = header->makeChild<Ling::Button>();
+	closeBtn->setColor(Theme::t(0x333333FF));
+	closeBtn->setHoverColor(Theme::t(0x333333FF));
 	closeBtn->setSize(36.f, 28.f);
 	closeBtn->setText(L"\ue62d");
 	closeBtn->setFontFamily(L"icon");
-	closeBtn->setHoverColor(0xFFFFFFFF);
-	closeBtn->setHoverBg(0xE81123FF);
+	closeBtn->setHoverColor(Theme::t(0xFFFFFFFF));
+	closeBtn->setHoverBg(Theme::c(0xE81123FF));
 	closeBtn->onClick.add([](Ling::Button* btn) { btn->win->close(); });
 
 	auto makeLabel = [this](const std::wstring& text) {
 		auto label = body->makeChild<Ling::Label>();
+		label->setColor(Theme::t(0x333333FF));
 		label->setText(text);
 		label->setHeight(28.f);
 		label->setJustifyContent(Ling::Justify::Center);
-		label->setColor(0x666666FF);
+		label->setColor(Theme::t(0x666666FF));
 		return label;
 	};
 	auto makeBox = [this]() {
 		auto box = body->makeChild<Ling::TextBox>();
+		box->setColor(Theme::t(0x333333FF));
 		box->setWidthPercent(100.f);
-		box->setBg(0xFFFFFFFF);
-		box->setBorder(1.f, 0xD9D9D9FF);
+		box->setBg(Theme::c(0xFFFFFFFF));
+		box->setBorder(1.f, Theme::c(0xD9D9D9FF));
 		box->setFontSize(13.f);
 		return box;
 	};
@@ -176,21 +182,24 @@ void WinPhraseEdit::onCreated()
 	clipRow->setAlignItems(Ling::Align::Center);
 	if (!editing) {
 		auto clipBtn = clipRow->makeChild<Ling::Button>();
+		clipBtn->setColor(Theme::t(0x333333FF));
+		clipBtn->setHoverColor(Theme::t(0x333333FF));
 		clipBtn->setText(Lang::get(L"clip.editUseClip"));
 		clipBtn->setHeight(28.f);
 		clipBtn->setWidth(210.f);
-		clipBtn->setBg(0xFFFFFFFF);
-		clipBtn->setHoverBg(0xF2F2F2FF);
-		clipBtn->setBorder(1.f, 0xD9D9D9FF);
+		clipBtn->setBg(Theme::c(0xFFFFFFFF));
+		clipBtn->setHoverBg(Theme::c(0xF2F2F2FF));
+		clipBtn->setBorder(1.f, Theme::c(0xD9D9D9FF));
 		clipBtn->onClick.add([this](Ling::Button*) { useClipboard(); });
 	}
 	clipLabel = clipRow->makeChild<Ling::Label>();
+	clipLabel->setColor(Theme::t(0x333333FF));
 	clipLabel->setHeightPercent(100.f);
 	clipLabel->setJustifyContent(Ling::Justify::Center);
 	clipLabel->setFlexGrow(1.f);
 	clipLabel->setMarginLeft(10.f);
 	clipLabel->setFontSize(12.f);
-	clipLabel->setColor(0x999999FF);
+	clipLabel->setColor(Theme::t(0x999999FF));
 
 	// 底部：取消 / 保存，靠右
 	auto footer = body->makeChild<Ling::Node>();
@@ -200,20 +209,24 @@ void WinPhraseEdit::onCreated()
 	auto spacer = footer->makeChild<Ling::Node>();
 	spacer->setFlexGrow(1.f);
 	auto cancelBtn = footer->makeChild<Ling::Button>();
+	cancelBtn->setColor(Theme::t(0x333333FF));
+	cancelBtn->setHoverColor(Theme::t(0x333333FF));
 	cancelBtn->setText(Lang::get(L"clip.editCancel"));
 	cancelBtn->setSize(88.f, 30.f);
-	cancelBtn->setBg(0xFFFFFFFF);
-	cancelBtn->setHoverBg(0xF2F2F2FF);
-	cancelBtn->setBorder(1.f, 0xD9D9D9FF);
+	cancelBtn->setBg(Theme::c(0xFFFFFFFF));
+	cancelBtn->setHoverBg(Theme::c(0xF2F2F2FF));
+	cancelBtn->setBorder(1.f, Theme::c(0xD9D9D9FF));
 	cancelBtn->onClick.add([](Ling::Button* btn) { btn->win->close(); });
 	auto saveBtn = footer->makeChild<Ling::Button>();
+	saveBtn->setColor(Theme::t(0x333333FF));
+	saveBtn->setHoverColor(Theme::t(0x333333FF));
 	saveBtn->setText(Lang::get(L"clip.editSave"));
 	saveBtn->setSize(88.f, 30.f);
 	saveBtn->setMarginLeft(10.f);
 	saveBtn->setBg(theme);
 	saveBtn->setHoverBg(theme);
-	saveBtn->setColor(0xFFFFFFFF);
-	saveBtn->setHoverColor(0xFFFFFFFF);
+	saveBtn->setColor(Theme::t(0xFFFFFFFF));
+	saveBtn->setHoverColor(Theme::t(0xFFFFFFFF));
 	saveBtn->onClick.add([this](Ling::Button*) { save(); });
 
 	show();

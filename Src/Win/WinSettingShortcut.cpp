@@ -1,6 +1,7 @@
 ﻿#include "pch.h"
 #include "../Lang.h"
 #include "../Setting.h"
+#include "../Theme.h"
 #include "WinSetting.h"
 #include "WinSettingShortcut.h"
 
@@ -106,25 +107,28 @@ WinSettingShortcut::WinSettingShortcut(Ling::WinBase* parent):Ling::Node(parent)
         box->setAlignItems(Ling::Align::Center);
 
         auto label = box->makeChild<Ling::Label>();
+        label->setColor(Theme::t(0x333333FF));
         label->setText(Lang::get(L"shortcut."+key));
         label->setHeightPercent(100.f);
         label->setJustifyContent(Ling::Justify::Center);
         label->setFlexGrow(1.f);
 
         auto btn = box->makeChild<Ling::Button>();
+        btn->setColor(Theme::t(0x333333FF));
+        btn->setHoverColor(Theme::t(0x333333FF));
         btn->setId(key);
         btn->setText(Setting::get()->getShortcutKey(key));
         btn->setHeight(28.f);
         btn->setWidth(120.f);
-        btn->setBg(0xFFFFFFFF);
-        btn->setHoverBg(0xFFFFFFFF);
-        btn->setBorder(1.f, 0xE0E0E0FF);
+        btn->setBg(Theme::c(0xFFFFFFFF));
+        btn->setHoverBg(Theme::c(0xFFFFFFFF));
+        btn->setBorder(1.f, Theme::c(0xE0E0E0FF));
         btn->onClick.add([this](Ling::Button* btn) {this->onBtnClick(btn);});
         btns.push_back(btn);
 
         auto border = makeChild<Ling::Node>();
         border->setHeight(1.f);
-        border->setBg(0xE0E0E0FF);
+        border->setBg(Theme::c(0xE0E0E0FF));
     }
 
     // 鼠标触发：不是键盘组合，点一下按钮在几个选项之间轮换。
@@ -136,18 +140,21 @@ WinSettingShortcut::WinSettingShortcut(Ling::WinBase* parent):Ling::Node(parent)
         box->setAlignItems(Ling::Align::Center);
 
         auto label = box->makeChild<Ling::Label>();
+        label->setColor(Theme::t(0x333333FF));
         label->setText(Lang::get(L"shortcut.mouse"));
         label->setHeightPercent(100.f);
         label->setJustifyContent(Ling::Justify::Center);
         label->setFlexGrow(1.f);
 
         auto btn = box->makeChild<Ling::Button>();
+        btn->setColor(Theme::t(0x333333FF));
+        btn->setHoverColor(Theme::t(0x333333FF));
         btn->setText(Lang::get(std::format(L"shortcut.mouse{}", Setting::get()->getMouseTrigger())));
         btn->setHeight(28.f);
         btn->setWidth(120.f);
-        btn->setBg(0xFFFFFFFF);
-        btn->setHoverBg(0xFFFFFFFF);
-        btn->setBorder(1.f, 0xE0E0E0FF);
+        btn->setBg(Theme::c(0xFFFFFFFF));
+        btn->setHoverBg(Theme::c(0xFFFFFFFF));
+        btn->setBorder(1.f, Theme::c(0xE0E0E0FF));
         btn->onClick.add([](Ling::Button* btn) {
             auto val = (Setting::get()->getMouseTrigger() + 1) % 4;
             Setting::get()->setMouseTrigger(val);
@@ -156,7 +163,7 @@ WinSettingShortcut::WinSettingShortcut(Ling::WinBase* parent):Ling::Node(parent)
 
         auto border = makeChild<Ling::Node>();
         border->setHeight(1.f);
-        border->setBg(0xE0E0E0FF);
+        border->setBg(Theme::c(0xE0E0E0FF));
     }
 
     auto weakThis = getWeakThis();

@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "../MsgBox.h"
 #include <algorithm>
 #include <cwctype>
 #include <cstdlib>
@@ -16,6 +17,7 @@
 #include "WinSettingData.h"
 #include "WinSettingAccount.h"
 #include "../Update.h"
+#include "../Theme.h"
 #include "../Lang.h"
 #include "../Setting.h"
 #include "../Punch.h"
@@ -25,6 +27,11 @@ using namespace winrt::Windows::Data::Json;
 
 namespace {
 	std::unique_ptr<WinClip> winClip;
+	// 画布上用的颜色：照白天的写，黑夜模式下自动换成深色那一套（见 Theme.h）
+	D2D1_COLOR_F col(UINT rgb, float alpha = 1.f)
+	{
+		return D2D1::ColorF(Theme::fill(rgb), alpha);
+	}
 	// 设置上次停在哪一页。改语言、改主题色、登录退出都会把面板关掉重开，重开后还回到这一页
 	int settingsPage{ 0 };
 	// 把一段字放进系统剪切板
@@ -81,8 +88,9 @@ namespace {
 	{
 		const int edge = Setting::get() ? Setting::get()->getDockEdge() : 0;
 		POINT pt{};
-		if (edge == 0 || !GetCursorPos(&pt)) return;
-		if (!atEdge(edge, pt)) {
+		if (!GetCursorPos(&pt)) return;
+		// 贴哪条边就顶哪条边；悬浮的（没贴边）顶屏幕右边，面板还是出现在它原来悬浮的位置
+		if (!atEdge(edge == 0 ? 3 : edge, pt)) {
 			dockArmed = true;
 			dockHits = 0;
 			return;
@@ -366,14 +374,9 @@ void WinClip::showAtStartup()
 
 void WinClip::applyDock()
 {
-	const int edge = Setting::get()->getDockEdge();
-	if (edge != 0 && !dockTimer) {
-		dockTimer = SetTimer(nullptr, 0, 50, onDockTimer);
-	}
-	else if (edge == 0 && dockTimer) {
-		KillTimer(nullptr, dockTimer);
-		dockTimer = 0;
-	}
+	// 这个定时器一直开着：面板点 ✕ 只是收起来，鼠标顶到屏幕边上随时能再叫出来。
+	// 面板是悬浮的（没贴边）也一样，那时认屏幕右边（见 onDockTimer）
+	if (!dockTimer) dockTimer = SetTimer(nullptr, 0, 50, onDockTimer);
 }
 
 void WinClip::setModal(bool val)
@@ -440,7 +443,8 @@ void WinClip::onCreated()
 	textBox->setWidth(w / dpi - 28.f);
 	textBox->setHeight(28.f);
 	textBox->setPadding(6.f, 2.f, 6.f, 2.f);
-	textBox->setBg(0xFFFFFFFF);
+	textBox->setBg(Theme::c(0xFFFFFFFF));
+	textBox->setColor(Theme::t(0x222222FF));
 	textBox->setFontSize(13.f);
 	textBox->setVerticalCenter(true);
 	textBox->onTextChanged.add([this](Ling::TextBox*, const std::wstring& text) { onTextEdit(text); });
@@ -829,7 +833,7 @@ void WinClip::drawText(ID2D1DeviceContext* ctx, const std::wstring& text, float 
 	if (!layout) return;
 	if (hCenter) layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
 	if (vCenter) layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-	brush->SetColor(D2D1::ColorF(rgb));
+	brush->SetColor(D2D1::ColorF(Theme::text(rgb)));
 	// CLIP：放不下的部分直接裁掉，不让它画到别的行上去
 	ctx->DrawTextLayout(D2D1::Point2F(rect.left, rect.top), layout.Get(), brush.Get(), D2D1_DRAW_TEXT_OPTIONS_CLIP);
 }
@@ -838,7 +842,7 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 {
 	const UINT theme = Setting::get()->getThemeColor();
 	const float pad = 10.f * dpi;
-	ctx->Clear(D2D1::ColorF(0xF7F7F8));
+	ctx->Clear(col(0xF7F7F8));
 	// 第一排：左边两个页签，右边几个小按钮，中间的空白可以拖着挪窗口
 	const float modeTop = 8.f * dpi, modeBottom = 38.f * dpi, modeW = modeTabW * dpi;
 	static const wchar_t* modeKeys[modeCount]{ L"punch.tab", L"ledger.tab", L"clip.modePhrase", L"clip.modeClip" };
@@ -846,7 +850,7 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 		auto rect = D2D1::RectF(pad + modeW * i, modeTop, pad + modeW * (i + 1), modeBottom);
 		const bool cur = i == mode;
 		if (cur) {
-			brush->SetColor(D2D1::ColorF(theme));
+			brush->SetColor(col(theme));
 			ctx->FillRoundedRectangle(D2D1::RoundedRect(rect, 6.f * dpi, 6.f * dpi), brush.Get());
 		}
 		const bool isHover = hover == Hit::Mode && hoverIndex == i;
@@ -856,7 +860,7 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 	auto topBtn = [&](int which, Hit hit, const std::wstring& text, float size, UINT rgb, bool filled) {
 		auto rect = topBtnRect(which);
 		if (filled || hover == hit) {
-			brush->SetColor(D2D1::ColorF(filled ? theme : 0x000000, filled ? 0.16f : 0.07f));
+			brush->SetColor(col(filled ? theme : 0x000000, filled ? 0.16f : 0.07f));
 			ctx->FillRoundedRectangle(D2D1::RoundedRect(rect, 5.f * dpi, 5.f * dpi), brush.Get());
 		}
 		drawText(ctx, text, size, rect, rgb, true, true);
@@ -878,9 +882,9 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 	// 新建 / 重命名分组时也借它来输入
 	auto searchRect = D2D1::RectF(pad, 44.f * dpi, w - pad, 76.f * dpi);
 	const bool active = (textBox && textBox->isFocused()) || input != Input::Search || !query.empty();
-	brush->SetColor(D2D1::ColorF(0xFFFFFF));
+	brush->SetColor(col(0xFFFFFF));
 	ctx->FillRoundedRectangle(D2D1::RoundedRect(searchRect, 6.f * dpi, 6.f * dpi), brush.Get());
-	brush->SetColor(D2D1::ColorF(active ? theme : 0xDDDDDD));
+	brush->SetColor(col(active ? theme : 0xDDDDDD));
 	ctx->DrawRoundedRectangle(D2D1::RoundedRect(searchRect, 6.f * dpi, 6.f * dpi), brush.Get(), dpi);
 
 	// 分类 / 分组标签，一排或几排
@@ -896,7 +900,7 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 		const bool isHover = hover == Hit::Tab && hoverIndex == i;
 		drawText(ctx, item.label, 13.f, rect, item.selected ? theme : isHover ? 0x333333 : 0x777777, true, true);
 		if (item.selected) {
-			brush->SetColor(D2D1::ColorF(theme));
+			brush->SetColor(col(theme));
 			ctx->FillRectangle(D2D1::RectF(rect.left + 8.f * dpi, rect.bottom - 2.f * dpi, rect.right - 8.f * dpi, rect.bottom), brush.Get());
 		}
 	}
@@ -905,7 +909,7 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 		auto clearRect = D2D1::RectF(w - pad - 50.f * dpi, tabTop, w - pad, tabBottom);
 		drawText(ctx, Lang::get(L"clip.clear"), 13.f, clearRect, hover == Hit::Clear ? 0xE64340 : 0x999999, true, true);
 	}
-	brush->SetColor(D2D1::ColorF(0xE3E3E5));
+	brush->SetColor(col(0xE3E3E5));
 	ctx->FillRectangle(D2D1::RectF(0.f, tabBottom + 3.f * dpi, w, tabBottom + 3.f * dpi + dpi), brush.Get());
 
 	if (mode == Ledger) {
@@ -933,7 +937,7 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 		if (contentH > viewH) {
 			const float barH = (std::max)(24.f * dpi, viewH * viewH / contentH);
 			const float barY = top + (viewH - barH) * scrollY / (contentH - viewH);
-			brush->SetColor(D2D1::ColorF(0x000000, 0.22f));
+			brush->SetColor(col(0x000000, 0.22f));
 			ctx->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(w - 5.f * dpi, barY, w - 2.f * dpi, barY + barH), 1.5f * dpi, 1.5f * dpi), brush.Get());
 		}
 	}
@@ -948,9 +952,9 @@ void WinClip::paintToast(ID2D1DeviceContext* ctx)
 	const float toastBottom = listBottom() - 12.f * dpi;
 	auto rect = D2D1::RectF((w - toastW) / 2.f, toastBottom - 32.f * dpi, (w + toastW) / 2.f, toastBottom);
 	// 白底、细边，成功是绿字，出错 / 警告是红字
-	brush->SetColor(D2D1::ColorF(0xFFFFFF));
+	brush->SetColor(col(0xFFFFFF));
 	ctx->FillRoundedRectangle(D2D1::RoundedRect(rect, 16.f * dpi, 16.f * dpi), brush.Get());
-	brush->SetColor(D2D1::ColorF(rgb, 0.5f));
+	brush->SetColor(col(rgb, 0.5f));
 	ctx->DrawRoundedRectangle(D2D1::RoundedRect(rect, 16.f * dpi, 16.f * dpi), brush.Get(), dpi);
 	drawText(ctx, toastText, 13.f, rect, rgb, true, true);
 }
@@ -971,11 +975,11 @@ void WinClip::paintPunch(ID2D1DeviceContext* ctx)
 	const auto cur = punch->current();
 	const auto nowMs = punch->now();
 	auto fillRound = [&](const D2D1_RECT_F& rect, float radius, UINT rgb, float alpha = 1.f) {
-		brush->SetColor(D2D1::ColorF(rgb, alpha));
+		brush->SetColor(col(rgb, alpha));
 		ctx->FillRoundedRectangle(D2D1::RoundedRect(rect, radius * u, radius * u), brush.Get());
 	};
 	auto strokeRound = [&](const D2D1_RECT_F& rect, float radius, UINT rgb, float alpha = 1.f) {
-		brush->SetColor(D2D1::ColorF(rgb, alpha));
+		brush->SetColor(col(rgb, alpha));
 		ctx->DrawRoundedRectangle(D2D1::RoundedRect(rect, radius * u, radius * u), brush.Get(), dpi);
 	};
 	// 登记一个按钮，返回光标是不是正悬在它上面
@@ -1022,7 +1026,7 @@ void WinClip::paintPunch(ID2D1DeviceContext* ctx)
 	else if (state == Punch::State::Away) { title = (rule ? rule->name : cur->act) + Lang::get(L"punch.stAway"); color = over ? red : orange; }
 	else if (state == Punch::State::Done) title = Lang::get(L"punch.stDone");
 	else title = Lang::get(L"punch.stOff");
-	brush->SetColor(D2D1::ColorF(color));
+	brush->SetColor(col(color));
 	ctx->FillEllipse(D2D1::Ellipse(D2D1::Point2F(card.left + 20.f * u, card.top + 26.f * u), 5.f * u, 5.f * u), brush.Get());
 	drawText(ctx, title, 17.f * k, D2D1::RectF(card.left + 34.f * u, card.top + 10.f * u, card.right - 150.f * u, card.top + 42.f * u), 0x222222, false, true);
 	// 右边的大计时：活动中是这次离开了多久，上班中是今天上了多久
@@ -1238,12 +1242,12 @@ void WinClip::enterSettings()
 	setHost->setPosition(Ling::Edge::Top, 42.f);
 	setHost->setPosition(Ling::Edge::Right, 0.f);
 	setHost->setPosition(Ling::Edge::Bottom, 0.f);
-	setHost->setBg(0xFAFAFAFF);
+	setHost->setBg(Theme::c(0xFAFAFAFF));
 	setHost->setFlexDirection(Ling::FlexDirection::Column);
 	// 页签条：通用 / 快捷键 / 关于 / 配置目录 / 账号
 	auto strip = setHost->makeChild<Ling::Node>();
 	strip->setHeight(38.f);
-	strip->setBg(0xEEEEF0FF);
+	strip->setBg(Theme::c(0xEEEEF0FF));
 	strip->setFlexDirection(Ling::FlexDirection::Row);
 	strip->setAlignItems(Ling::Align::Center);
 	strip->setPadding(10.f, 0.f, 10.f, 0.f);
@@ -1274,7 +1278,7 @@ void WinClip::enterSettings()
 	verLabel->setJustifyContent(Ling::Justify::Center);
 	verLabel->setFlexGrow(1.f);
 	verLabel->setMarginLeft(16.f);
-	verLabel->setColor(0x888888FF);
+	verLabel->setColor(Theme::t(0x888888FF));
 	verLabel->setFontSize(12.f);
 	setUpdateBtn = status->makeChild<Ling::Button>();
 	setUpdateBtn->setHeight(24.f);
@@ -1311,10 +1315,10 @@ void WinClip::showSettingsPage(int index)
 	const uint32_t theme = (Setting::get()->getThemeColor() << 8) | 0xFF;
 	for (int i = 0; i < (int)setTabs.size(); i++) {
 		const bool cur = i == index;
-		setTabs[i]->setColor(cur ? 0xFFFFFFFF : 0x333333FF);
+		setTabs[i]->setColor(cur ? 0xFFFFFFFF : Theme::t(0x333333FF));
 		setTabs[i]->setBg(cur ? theme : 0x00000000);
-		setTabs[i]->setHoverColor(cur ? 0xFFFFFFFF : 0x000000FF);
-		setTabs[i]->setHoverBg(cur ? theme : 0xE1E1E3FF);
+		setTabs[i]->setHoverColor(cur ? 0xFFFFFFFF : Theme::t(0x000000FF));
+		setTabs[i]->setHoverBg(cur ? theme : Theme::c(0xE1E1E3FF));
 	}
 	if (index == 0) setPage = setHost->makeChild<WinSettingCommon>();
 	else if (index == 1) setPage = setHost->makeChild<WinSettingShortcut>();
@@ -1339,8 +1343,8 @@ void WinClip::refreshUpdateBtn()
 	// 按钮只有文字那么宽
 	setUpdateBtn->setWidth(textWidth(text, 12.f) / dpi + 16.f);
 	// 有新版本用红色，够显眼；其余是不起眼的灰色
-	setUpdateBtn->setColor(state == 2 ? 0xE64340FF : 0x888888FF);
-	setUpdateBtn->setHoverColor(state == 2 ? 0xC0392BFF : 0x555555FF);
+	setUpdateBtn->setColor(state == 2 ? 0xE64340FF : Theme::t(0x888888FF));
+	setUpdateBtn->setHoverColor(state == 2 ? 0xC0392BFF : Theme::t(0x555555FF));
 }
 
 void WinClip::leaveSettings(int toMode)
@@ -1533,10 +1537,10 @@ void WinClip::paintBill(ID2D1DeviceContext* ctx, const D2D1_RECT_F& card)
 		auto box = D2D1::RectF(x, top + (lineH - boxH) / 2.f, x + width, top + (lineH + boxH) / 2.f);
 		const bool hot = !piece.copy.empty() && copyArea(box, piece.copy);
 		if (piece.chip) {
-			brush->SetColor(D2D1::ColorF(piece.rgb, hot ? 0.24f : 0.12f));
+			brush->SetColor(col(piece.rgb, hot ? 0.24f : 0.12f));
 			ctx->FillRoundedRectangle(D2D1::RoundedRect(box, 5.f * dpi, 5.f * dpi), brush.Get());
 		}
-		brush->SetColor(D2D1::ColorF(piece.rgb));
+		brush->SetColor(col(piece.rgb));
 		ctx->DrawTextLayout(D2D1::Point2F(x + padX, top + (lineH - tm.height) / 2.f), layout.Get(), brush.Get());
 		if (hot && !piece.chip) ctx->DrawLine(D2D1::Point2F(x, box.bottom - 1.f * dpi), D2D1::Point2F(x + width, box.bottom - 1.f * dpi), brush.Get(), dpi);
 		return width;
@@ -1555,7 +1559,7 @@ void WinClip::paintBill(ID2D1DeviceContext* ctx, const D2D1_RECT_F& card)
 		y += lineH;
 	};
 	auto hairline = [&](UINT rgb) {
-		brush->SetColor(D2D1::ColorF(rgb));
+		brush->SetColor(col(rgb));
 		ctx->DrawLine(D2D1::Point2F(left, y), D2D1::Point2F(right, y), brush.Get(), dpi);
 	};
 
@@ -1613,7 +1617,7 @@ void WinClip::paintBill(ID2D1DeviceContext* ctx, const D2D1_RECT_F& card)
 			layout->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, 20.f * dpi, 15.f * dpi);
 			DWRITE_TEXT_METRICS tm{};
 			layout->GetMetrics(&tm);
-			brush->SetColor(D2D1::ColorF(0x666666));
+			brush->SetColor(col(0x666666));
 			ctx->DrawTextLayout(D2D1::Point2F(left, y), layout.Get(), brush.Get());
 			y += tm.height;
 		}
@@ -1705,11 +1709,11 @@ void WinClip::paintLedger(ID2D1DeviceContext* ctx)
 	const float pad = 10.f * dpi;
 	auto punch = ::Punch::get();
 	auto fillRound = [&](const D2D1_RECT_F& rect, float radius, UINT rgb, float alpha = 1.f) {
-		brush->SetColor(D2D1::ColorF(rgb, alpha));
+		brush->SetColor(col(rgb, alpha));
 		ctx->FillRoundedRectangle(D2D1::RoundedRect(rect, radius * dpi, radius * dpi), brush.Get());
 	};
 	auto strokeRound = [&](const D2D1_RECT_F& rect, float radius, UINT rgb) {
-		brush->SetColor(D2D1::ColorF(rgb));
+		brush->SetColor(col(rgb));
 		ctx->DrawRoundedRectangle(D2D1::RoundedRect(rect, radius * dpi, radius * dpi), brush.Get(), dpi);
 	};
 	auto addBtn = [&](const D2D1_RECT_F& rect, const std::wstring& id) {
@@ -1796,7 +1800,7 @@ void WinClip::paintLedger(ID2D1DeviceContext* ctx)
 			DWRITE_TEXT_METRICS tm{};
 			layout->GetMetrics(&tm);
 			contentH = tm.height + inner * 2.f;
-			brush->SetColor(D2D1::ColorF(ledgerFailed ? 0xE64340 : 0x222222));
+			brush->SetColor(col(ledgerFailed ? 0xE64340 : 0x222222));
 			ctx->DrawTextLayout(D2D1::Point2F(card.left + inner, card.top + inner - scrollY), layout.Get(), brush.Get());
 		}
 	}
@@ -1807,7 +1811,7 @@ void WinClip::paintLedger(ID2D1DeviceContext* ctx)
 	if (contentH > viewH) {
 		const float barH = (std::max)(24.f * dpi, viewH * viewH / contentH);
 		const float barY = card.top + (viewH - barH) * scrollY / (contentH - viewH);
-		brush->SetColor(D2D1::ColorF(0x000000, 0.22f));
+		brush->SetColor(col(0x000000, 0.22f));
 		ctx->FillRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(w - 6.f * dpi - pad, barY, w - 3.f * dpi - pad, barY + barH), 1.5f * dpi, 1.5f * dpi), brush.Get());
 	}
 }
@@ -1869,11 +1873,11 @@ void WinClip::paintRow(ID2D1DeviceContext* ctx, const Row& row, int index, float
 	auto& item = *row.item;
 	const bool isHover = hoverIndex == index && hover >= Hit::Row && hover <= Hit::Btn2;
 	if (index == selRow) {
-		brush->SetColor(D2D1::ColorF(theme, 0.12f));
+		brush->SetColor(col(theme, 0.12f));
 		ctx->FillRectangle(D2D1::RectF(0.f, y, w, y + row.height), brush.Get());
 	}
 	else if (isHover) {
-		brush->SetColor(D2D1::ColorF(0x000000, 0.05f));
+		brush->SetColor(col(0x000000, 0.05f));
 		ctx->FillRectangle(D2D1::RectF(0.f, y, w, y + row.height), brush.Get());
 	}
 	const float left = pad + 4.f * dpi;
@@ -1936,7 +1940,7 @@ void WinClip::paintRow(ID2D1DeviceContext* ctx, const Row& row, int index, float
 			const float scale = (std::min)({ boxW / size.width, boxH / size.height, 1.f });
 			auto dest = D2D1::RectF(mainRect.left, mainRect.top, mainRect.left + size.width * scale, mainRect.top + size.height * scale);
 			ctx->DrawBitmap(thumb, dest, 1.f, D2D1_INTERPOLATION_MODE_LINEAR);
-			brush->SetColor(D2D1::ColorF(0x000000, 0.12f));
+			brush->SetColor(col(0x000000, 0.12f));
 			ctx->DrawRectangle(dest, brush.Get(), 1.f);
 		}
 	}
@@ -1956,7 +1960,7 @@ void WinClip::paintRow(ID2D1DeviceContext* ctx, const Row& row, int index, float
 			item.pinned ? theme : btnColor(Hit::Btn1, 0x555555), true, true);
 		drawText(ctx, L"＋", 15.f, btnRect(y, row.height, 2), btnColor(Hit::Btn2, theme), true, true);
 	}
-	brush->SetColor(D2D1::ColorF(0xEBEBED));
+	brush->SetColor(col(0xEBEBED));
 	ctx->FillRectangle(D2D1::RectF(pad, y + row.height - dpi, w - pad, y + row.height), brush.Get());
 }
 
@@ -2193,8 +2197,8 @@ bool WinClip::confirmTwice(const std::wstring& first, const std::wstring& second
 	auto title = Lang::get(L"about.sysTip");
 	const UINT flags = MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2 | MB_TOPMOST;
 	modal = true;
-	const bool ok = MessageBox(hwnd, first.data(), title.data(), flags) == IDYES
-		&& MessageBox(hwnd, second.data(), title.data(), flags) == IDYES;
+	const bool ok = UUMessageBox(hwnd, first.data(), title.data(), flags) == IDYES
+		&& UUMessageBox(hwnd, second.data(), title.data(), flags) == IDYES;
 	modal = false;
 	SetForegroundWindow(hwnd);
 	SetFocus(hwnd);
@@ -2204,7 +2208,7 @@ bool WinClip::confirmTwice(const std::wstring& first, const std::wstring& second
 bool WinClip::confirmOnce(const std::wstring& text)
 {
 	modal = true;
-	const bool ok = MessageBox(hwnd, text.data(), Lang::get(L"about.sysTip").data(),
+	const bool ok = UUMessageBox(hwnd, text.data(), Lang::get(L"about.sysTip").data(),
 		MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2 | MB_TOPMOST) == IDYES;
 	modal = false;
 	SetForegroundWindow(hwnd);

@@ -29,6 +29,9 @@ public:
 	std::pair<float, float> getClipSize();
 	void setClipSize(float w, float h);
 	// 面板的"固定"开关：固定后贴边的面板不会自己缩回去，用完一条话术也不关
+	// 黑夜模式（深色界面）
+	bool getDarkMode();
+	void setDarkMode(bool val);
 	bool getClipPinned();
 	void setClipPinned(bool val);
 	// 面板上次摆在哪（屏幕坐标）。没摆过返回 false

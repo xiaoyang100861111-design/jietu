@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "MsgBox.h"
 #include <commctrl.h>
 #include <filesystem>
 #include <fstream>
@@ -114,7 +115,7 @@ namespace {
 
 	void tip(const std::wstring& text, UINT icon = MB_ICONINFORMATION)
 	{
-		MessageBox(nullptr, text.data(), L"UU截图", MB_OK | icon | MB_TOPMOST | MB_SETFOREGROUND);
+		UUMessageBox(nullptr, text.data(), L"UU截图", MB_OK | icon | MB_TOPMOST | MB_SETFOREGROUND);
 	}
 
 	// 等一个 WinRT 异步操作，超时就取消并抛。只能在后台线程用
@@ -175,7 +176,7 @@ namespace {
 		}
 		// 退路：普通消息框只有 是 / 否 / 取消 三个键，把含义写在正文里
 		auto text = title + L"\n\n" + content + L"\n\n" + Lang::get(L"update.fallbackTip");
-		auto ret = MessageBox(nullptr, text.data(), L"UU截图", MB_YESNOCANCEL | MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND);
+		auto ret = UUMessageBox(nullptr, text.data(), L"UU截图", MB_YESNOCANCEL | MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND);
 		return ret == IDYES ? 1 : ret == IDNO ? 2 : 0;
 	}
 
@@ -210,7 +211,7 @@ namespace {
 			}
 			// 自动升级没走通：问用户要不要自己去下
 			auto text = Lang::get(L"update.failed");
-			if (MessageBox(nullptr, text.data(), L"UU截图", MB_OKCANCEL | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND) == IDOK) {
+			if (UUMessageBox(nullptr, text.data(), L"UU截图", MB_OKCANCEL | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND) == IDOK) {
 				ShellExecute(nullptr, L"open", defaultExeUrl.data(), nullptr, nullptr, SW_SHOWNORMAL);
 			}
 		});

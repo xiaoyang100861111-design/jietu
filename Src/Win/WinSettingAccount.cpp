@@ -1,6 +1,8 @@
 #include "pch.h"
+#include "../MsgBox.h"
 #include "../Lang.h"
 #include "../Setting.h"
+#include "../Theme.h"
 #include "../Sync.h"
 #include "WinSetting.h"
 #include "WinSettingAccount.h"
@@ -45,7 +47,7 @@ WinSettingAccount::~WinSettingAccount()
 void WinSettingAccount::tip(const std::wstring& text, bool warn)
 {
     if (!tipLabel) return;
-    tipLabel->setColor(warn ? 0xE64340FF : 0x888888FF);
+    tipLabel->setColor(warn ? Theme::t(0xE64340FF) : Theme::t(0x888888FF));
     tipLabel->setText(text);
 }
 
@@ -53,18 +55,20 @@ void WinSettingAccount::buildLogin()
 {
     auto makeLabel = [this](const std::wstring& text) {
         auto label = makeChild<Ling::Label>();
+        label->setColor(Theme::t(0x333333FF));
         label->setText(text);
         label->setHeight(30.f);
         label->setJustifyContent(Ling::Justify::Center);
-        label->setColor(0x666666FF);
+        label->setColor(Theme::t(0x666666FF));
     };
     auto makeBox = [this]() {
         auto box = makeChild<Ling::TextBox>();
+        box->setColor(Theme::t(0x333333FF));
         box->setWidth(320.f);
         box->setHeight(34.f);
         box->setPadding(8.f, 2.f, 8.f, 2.f);
-        box->setBg(0xFFFFFFFF);
-        box->setBorder(1.f, 0xD9D9D9FF);
+        box->setBg(Theme::c(0xFFFFFFFF));
+        box->setBorder(1.f, Theme::c(0xD9D9D9FF));
         box->setFontSize(14.f);
         box->setVerticalCenter(true);
         return box;
@@ -80,23 +84,28 @@ void WinSettingAccount::buildLogin()
     row->setAlignItems(Ling::Align::Center);
     const uint32_t theme = (Setting::get()->getThemeColor() << 8) | 0xFF;
     auto loginBtn = row->makeChild<Ling::Button>();
+    loginBtn->setColor(Theme::t(0x333333FF));
+    loginBtn->setHoverColor(Theme::t(0x333333FF));
     loginBtn->setText(Lang::get(L"sync.login"));
     loginBtn->setSize(100.f, 32.f);
     loginBtn->setBg(theme);
     loginBtn->setHoverBg(theme);
-    loginBtn->setColor(0xFFFFFFFF);
-    loginBtn->setHoverColor(0xFFFFFFFF);
+    loginBtn->setColor(Theme::t(0xFFFFFFFF));
+    loginBtn->setHoverColor(Theme::t(0xFFFFFFFF));
     loginBtn->onClick.add([this](Ling::Button*) { submit(false); });
     auto regBtn = row->makeChild<Ling::Button>();
+    regBtn->setColor(Theme::t(0x333333FF));
+    regBtn->setHoverColor(Theme::t(0x333333FF));
     regBtn->setText(Lang::get(L"sync.register"));
     regBtn->setSize(120.f, 32.f);
     regBtn->setMarginLeft(10.f);
-    regBtn->setBg(0xFFFFFFFF);
-    regBtn->setHoverBg(0xF2F2F2FF);
-    regBtn->setBorder(1.f, 0xD9D9D9FF);
+    regBtn->setBg(Theme::c(0xFFFFFFFF));
+    regBtn->setHoverBg(Theme::c(0xF2F2F2FF));
+    regBtn->setBorder(1.f, Theme::c(0xD9D9D9FF));
     regBtn->onClick.add([this](Ling::Button*) { submit(true); });
 
     tipLabel = makeChild<Ling::Label>();
+    tipLabel->setColor(Theme::t(0x333333FF));
     tipLabel->setHeight(120.f);
     tipLabel->setFontSize(12.f);
     tip(Lang::get(L"sync.intro"), false);
@@ -105,6 +114,7 @@ void WinSettingAccount::buildLogin()
 void WinSettingAccount::buildProfile()
 {
     auto name = makeChild<Ling::Label>();
+    name->setColor(Theme::t(0x333333FF));
     name->setText(Lang::get(L"sync.loggedIn") + Sync::username());
     name->setHeight(40.f);
     name->setJustifyContent(Ling::Justify::Center);
@@ -116,12 +126,14 @@ void WinSettingAccount::buildProfile()
     row->setAlignItems(Ling::Align::Center);
     auto makeBtn = [row](const std::wstring& text, float left) {
         auto btn = row->makeChild<Ling::Button>();
+        btn->setColor(Theme::t(0x333333FF));
+        btn->setHoverColor(Theme::t(0x333333FF));
         btn->setText(text);
         btn->setSize(110.f, 32.f);
         btn->setMarginLeft(left);
-        btn->setBg(0xFFFFFFFF);
-        btn->setHoverBg(0xF2F2F2FF);
-        btn->setBorder(1.f, 0xD9D9D9FF);
+        btn->setBg(Theme::c(0xFFFFFFFF));
+        btn->setHoverBg(Theme::c(0xF2F2F2FF));
+        btn->setBorder(1.f, Theme::c(0xD9D9D9FF));
         return btn;
     };
     makeBtn(Lang::get(L"sync.pushNow"), 0.f)->onClick.add([this](Ling::Button*) {
@@ -136,6 +148,7 @@ void WinSettingAccount::buildProfile()
     });
 
     tipLabel = makeChild<Ling::Label>();
+    tipLabel->setColor(Theme::t(0x333333FF));
     tipLabel->setHeight(120.f);
     tipLabel->setFontSize(12.f);
     tip(Lang::get(L"sync.introIn"), false);
@@ -157,7 +170,7 @@ void WinSettingAccount::submit(bool isRegister)
             return;
         }
         // 成功了：结果用弹框告诉用户（取回了服务端配置的话软件马上要重启，页面上的字来不及看）
-        MessageBox(nullptr, msg.data(), L"UU截图", MB_OK | MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND);
+        UUMessageBox(nullptr, msg.data(), L"UU截图", MB_OK | MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND);
         if (current) reopen(current->win);
     });
 }

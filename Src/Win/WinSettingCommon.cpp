@@ -5,6 +5,7 @@
 #include <cwctype>
 #include "../Lang.h"
 #include "../Setting.h"
+#include "../Theme.h"
 #include "WinSetting.h"
 #include "WinSettingCommon.h"
 
@@ -13,6 +14,7 @@ WinSettingCommon::WinSettingCommon(Ling::WinBase* parent):Ling::Node(parent)
     initAutoStartCtrls();
     initLangCtrls();
     initThemeCtrls();
+    initDarkCtrls();
     initClipCtrls();
     initDockCtrls();
     initWidthCtrls(L"rect");
@@ -60,12 +62,15 @@ void WinSettingCommon::initAutoStartCtrls()
     box->setAlignItems(Ling::Align::Center);
 
     auto label = box->makeChild<Ling::Label>();
+    label->setColor(Theme::t(0x333333FF));
     label->setText(Lang::get(L"setting.autoStart"));
     label->setHeightPercent(100.f);
     label->setJustifyContent(Ling::Justify::Center);
     label->setFlexGrow(1.f);
 
     auto btn = box->makeChild<Ling::Button>();
+    btn->setColor(Theme::t(0x333333FF));
+    btn->setHoverColor(Theme::t(0x333333FF));
     btn->setText(L"\ue687");
     btn->setFontFamily(L"icon");
     btn->setHeightPercent(100.f);
@@ -82,7 +87,7 @@ void WinSettingCommon::initAutoStartCtrls()
 
     auto border = makeChild<Ling::Node>();
     border->setHeight(1.f);
-    border->setBg(0xE0E0E0FF);
+    border->setBg(Theme::c(0xE0E0E0FF));
 }
 
 void WinSettingCommon::initLangCtrls()
@@ -93,6 +98,7 @@ void WinSettingCommon::initLangCtrls()
     box->setAlignItems(Ling::Align::Center);
 
     auto label = box->makeChild<Ling::Label>();
+    label->setColor(Theme::t(0x333333FF));
     label->setText(Lang::get(L"setting.language"));
     label->setHeightPercent(100.f);
     label->setJustifyContent(Ling::Justify::Center);
@@ -109,18 +115,20 @@ void WinSettingCommon::initLangCtrls()
         }
     }
     selectBtn = box->makeChild<Ling::Button>();
+    selectBtn->setColor(Theme::t(0x333333FF));
+    selectBtn->setHoverColor(Theme::t(0x333333FF));
     selectBtn->setText(langName);
     selectBtn->setHeight(28.f);
     selectBtn->setWidth(160.f);
-    selectBtn->setBorder(1.f, 0xE0E0E0FF);
-    selectBtn->setHoverBg(0XFFFFFFFF);
+    selectBtn->setBorder(1.f, Theme::c(0xE0E0E0FF));
+    selectBtn->setHoverBg(Theme::c(0XFFFFFFFF));
     selectBtn->onClick.add([this](Ling::Button* btn) {
         if (selectBox) return;
         this->showSelectBox(btn);
         });
     auto border = makeChild<Ling::Node>();
     border->setHeight(1.f);
-    border->setBg(0xE0E0E0FF);
+    border->setBg(Theme::c(0xE0E0E0FF));
 }
 
 // 快捷话术面板贴边：点一下按钮在 关闭 / 左 / 上 / 右 / 下 之间轮换
@@ -132,17 +140,20 @@ void WinSettingCommon::initDockCtrls()
     box->setAlignItems(Ling::Align::Center);
 
     auto label = box->makeChild<Ling::Label>();
+    label->setColor(Theme::t(0x333333FF));
     label->setText(Lang::get(L"setting.dock"));
     label->setHeightPercent(100.f);
     label->setJustifyContent(Ling::Justify::Center);
     label->setFlexGrow(1.f);
 
     auto btn = box->makeChild<Ling::Button>();
+    btn->setColor(Theme::t(0x333333FF));
+    btn->setHoverColor(Theme::t(0x333333FF));
     btn->setText(Lang::get(std::format(L"setting.dock{}", Setting::get()->getDockEdge())));
     btn->setHeight(28.f);
     btn->setWidth(160.f);
-    btn->setBorder(1.f, 0xE0E0E0FF);
-    btn->setHoverBg(0XFFFFFFFF);
+    btn->setBorder(1.f, Theme::c(0xE0E0E0FF));
+    btn->setHoverBg(Theme::c(0XFFFFFFFF));
     btn->onClick.add([](Ling::Button* btn) {
         auto val = (Setting::get()->getDockEdge() + 1) % 5;
         Setting::get()->setDockEdge(val);
@@ -151,7 +162,7 @@ void WinSettingCommon::initDockCtrls()
 
     auto border = makeChild<Ling::Node>();
     border->setHeight(1.f);
-    border->setBg(0xE0E0E0FF);
+    border->setBg(Theme::c(0xE0E0E0FF));
 }
 
 // 矩形 / 圆形的默认颜色和线条粗细。和标注工具条上的色块、滑块存的是同一份值
@@ -164,6 +175,7 @@ void WinSettingCommon::initWidthCtrls(const std::wstring& tool)
     box->setAlignItems(Ling::Align::Center);
 
     auto label = box->makeChild<Ling::Label>();
+    label->setColor(Theme::t(0x333333FF));
     label->setText(Lang::get(L"setting." + tool + L"Width"));
     label->setHeightPercent(100.f);
     label->setJustifyContent(Ling::Justify::Center);
@@ -175,11 +187,13 @@ void WinSettingCommon::initWidthCtrls(const std::wstring& tool)
     };
     auto makeBtn = [box](const std::wstring& text, float width) {
         auto btn = box->makeChild<Ling::Button>();
+        btn->setColor(Theme::t(0x333333FF));
+        btn->setHoverColor(Theme::t(0x333333FF));
         btn->setText(text);
         btn->setHeight(28.f);
         btn->setWidth(width);
-        btn->setBorder(1.f, 0xE0E0E0FF);
-        btn->setHoverBg(0XFFFFFFFF);
+        btn->setBorder(1.f, Theme::c(0xE0E0E0FF));
+        btn->setHoverBg(Theme::c(0XFFFFFFFF));
         return btn;
     };
     makeColorCtrls(box, tool);
@@ -197,7 +211,7 @@ void WinSettingCommon::initWidthCtrls(const std::wstring& tool)
 
     auto border = makeChild<Ling::Node>();
     border->setHeight(1.f);
-    border->setBg(0xE0E0E0FF);
+    border->setBg(Theme::c(0xE0E0E0FF));
 }
 
 // 截图翻译用的两个引擎：文字识别、翻译。都是点一下按钮在两个选项之间切换
@@ -210,21 +224,24 @@ void WinSettingCommon::initEngineCtrls()
         box->setAlignItems(Ling::Align::Center);
 
         auto label = box->makeChild<Ling::Label>();
+        label->setColor(Theme::t(0x333333FF));
         label->setText(Lang::get(labelKey));
         label->setHeightPercent(100.f);
         label->setJustifyContent(Ling::Justify::Center);
         label->setFlexGrow(1.f);
 
         auto btn = box->makeChild<Ling::Button>();
+        btn->setColor(Theme::t(0x333333FF));
+        btn->setHoverColor(Theme::t(0x333333FF));
         btn->setText(text);
         btn->setHeight(28.f);
         btn->setWidth(220.f);
-        btn->setBorder(1.f, 0xE0E0E0FF);
-        btn->setHoverBg(0XFFFFFFFF);
+        btn->setBorder(1.f, Theme::c(0xE0E0E0FF));
+        btn->setHoverBg(Theme::c(0XFFFFFFFF));
 
         auto border = makeChild<Ling::Node>();
         border->setHeight(1.f);
-        border->setBg(0xE0E0E0FF);
+        border->setBg(Theme::c(0xE0E0E0FF));
         return btn;
     };
     auto setting = Setting::get();
@@ -251,6 +268,7 @@ void WinSettingCommon::initUpdateCtrls()
     box->setAlignItems(Ling::Align::Center);
 
     auto label = box->makeChild<Ling::Label>();
+    label->setColor(Theme::t(0x333333FF));
     label->setText(Lang::get(L"setting.updateCheck"));
     label->setHeightPercent(100.f);
     label->setJustifyContent(Ling::Justify::Center);
@@ -259,10 +277,12 @@ void WinSettingCommon::initUpdateCtrls()
     auto apply = [](Ling::Button* btn) {
         const bool on = Setting::get()->getUpdateEnabled();
         btn->setText(on ? L"\ue688" : L"\ue687");
-        btn->setColor(on ? 0x597ef7ff : 0x666666FF);
-        btn->setHoverColor(on ? 0x597ef7ff : 0x666666FF);
+        btn->setColor(on ? Theme::t(0x597ef7ff) : Theme::t(0x666666FF));
+        btn->setHoverColor(on ? Theme::t(0x597ef7ff) : Theme::t(0x666666FF));
     };
     auto btn = box->makeChild<Ling::Button>();
+    btn->setColor(Theme::t(0x333333FF));
+    btn->setHoverColor(Theme::t(0x333333FF));
     btn->setFontFamily(L"icon");
     btn->setHeightPercent(100.f);
     btn->setFontSize(18.f);
@@ -275,10 +295,47 @@ void WinSettingCommon::initUpdateCtrls()
 
     auto border = makeChild<Ling::Node>();
     border->setHeight(1.f);
-    border->setBg(0xE0E0E0FF);
+    border->setBg(Theme::c(0xE0E0E0FF));
 }
 
 // 记录剪切板历史的开关，样子和开机自启动那个一样
+// 黑夜模式：整个面板和设置换成深色。切换后把面板关掉重开一遍（同改主题色）
+void WinSettingCommon::initDarkCtrls()
+{
+    auto box = makeChild<Ling::Node>();
+    box->setHeight(39.f);
+    box->setFlexDirection(Ling::FlexDirection::Row);
+    box->setAlignItems(Ling::Align::Center);
+
+    auto label = box->makeChild<Ling::Label>();
+    label->setColor(Theme::t(0x333333FF));
+    label->setText(Lang::get(L"setting.darkMode"));
+    label->setHeightPercent(100.f);
+    label->setJustifyContent(Ling::Justify::Center);
+    label->setFlexGrow(1.f);
+
+    const bool on = Setting::get()->getDarkMode();
+    auto btn = box->makeChild<Ling::Button>();
+    btn->setFontFamily(L"icon");
+    btn->setHeightPercent(100.f);
+    btn->setFontSize(18.f);
+    btn->setWidth(60.f);
+    btn->setText(on ? L"\ue688" : L"\ue687");
+    btn->setColor(on ? 0x597ef7ff : Theme::t(0x666666FF));
+    btn->setHoverColor(on ? 0x597ef7ff : Theme::t(0x666666FF));
+    btn->onClick.add([](Ling::Button* btn) {
+        Setting::get()->setDarkMode(!Setting::get()->getDarkMode());
+        btn->win->close();
+        Ling::App::get()->dq.TryEnqueue([]() {
+            WinSetting::init();
+        });
+    });
+
+    auto border = makeChild<Ling::Node>();
+    border->setHeight(1.f);
+    border->setBg(Theme::c(0xE0E0E0FF));
+}
+
 void WinSettingCommon::initClipCtrls()
 {
     auto box = makeChild<Ling::Node>();
@@ -287,6 +344,7 @@ void WinSettingCommon::initClipCtrls()
     box->setAlignItems(Ling::Align::Center);
 
     auto label = box->makeChild<Ling::Label>();
+    label->setColor(Theme::t(0x333333FF));
     label->setText(Lang::get(L"setting.clipHistory"));
     label->setHeightPercent(100.f);
     label->setJustifyContent(Ling::Justify::Center);
@@ -295,10 +353,12 @@ void WinSettingCommon::initClipCtrls()
     auto apply = [](Ling::Button* btn) {
         const bool on = Setting::get()->getClipEnabled();
         btn->setText(on ? L"\ue688" : L"\ue687");
-        btn->setColor(on ? 0x597ef7ff : 0x666666FF);
-        btn->setHoverColor(on ? 0x597ef7ff : 0x666666FF);
+        btn->setColor(on ? Theme::t(0x597ef7ff) : Theme::t(0x666666FF));
+        btn->setHoverColor(on ? Theme::t(0x597ef7ff) : Theme::t(0x666666FF));
     };
     auto btn = box->makeChild<Ling::Button>();
+    btn->setColor(Theme::t(0x333333FF));
+    btn->setHoverColor(Theme::t(0x333333FF));
     btn->setFontFamily(L"icon");
     btn->setHeightPercent(100.f);
     btn->setFontSize(18.f);
@@ -311,7 +371,7 @@ void WinSettingCommon::initClipCtrls()
 
     auto border = makeChild<Ling::Node>();
     border->setHeight(1.f);
-    border->setBg(0xE0E0E0FF);
+    border->setBg(Theme::c(0xE0E0E0FF));
 }
 
 namespace {
@@ -381,13 +441,15 @@ void WinSettingCommon::makeColorCtrls(Ling::Node* box, const std::wstring& targe
     const UINT rgb = getColor(target);
     const uint32_t rgba = (rgb << 8) | 0xFF;
     auto swatch = box->makeChild<Ling::Button>();
+    swatch->setColor(Theme::t(0x333333FF));
+    swatch->setHoverColor(Theme::t(0x333333FF));
     swatch->setId(target);
     swatch->setHeight(22.f);
     swatch->setWidth(52.f);
     swatch->setMarginRight(8.f);
     swatch->setBg(rgba);
     swatch->setHoverBg(rgba);
-    swatch->setBorder(1.f, 0xE0E0E0FF);
+    swatch->setBorder(1.f, Theme::c(0xE0E0E0FF));
     swatch->onClick.add([this](Ling::Button* btn) {
         auto target = btn->id;
         endHexInput(false);
@@ -406,14 +468,16 @@ void WinSettingCommon::makeColorCtrls(Ling::Node* box, const std::wstring& targe
     swatches[target] = swatch;
 
     auto hex = box->makeChild<Ling::Button>();
+    hex->setColor(Theme::t(0x333333FF));
+    hex->setHoverColor(Theme::t(0x333333FF));
     hex->setId(target);
     hex->setText(hexStr(rgb));
     hex->setHeight(28.f);
     hex->setWidth(96.f);
     hex->setMarginRight(target == L"theme" ? 0.f : 12.f);
-    hex->setBg(0xFFFFFFFF);
-    hex->setHoverBg(0xFFFFFFFF);
-    hex->setBorder(1.f, 0xE0E0E0FF);
+    hex->setBg(Theme::c(0xFFFFFFFF));
+    hex->setHoverBg(Theme::c(0xFFFFFFFF));
+    hex->setBorder(1.f, Theme::c(0xE0E0E0FF));
     hex->onClick.add([this](Ling::Button* btn) {
         // 再点一下正在敲的那个 = 不敲了
         const bool same = hexTarget == btn->id;
@@ -489,6 +553,7 @@ void WinSettingCommon::initThemeCtrls()
     box->setAlignItems(Ling::Align::Center);
 
     auto label = box->makeChild<Ling::Label>();
+    label->setColor(Theme::t(0x333333FF));
     label->setText(Lang::get(L"setting.themeColor"));
     label->setHeightPercent(100.f);
     label->setJustifyContent(Ling::Justify::Center);
@@ -498,7 +563,7 @@ void WinSettingCommon::initThemeCtrls()
 
     auto border = makeChild<Ling::Node>();
     border->setHeight(1.f);
-    border->setBg(0xE0E0E0FF);
+    border->setBg(Theme::c(0xE0E0E0FF));
 }
 
 void WinSettingCommon::setAutoStartBtn(Ling::Button* btn)
@@ -507,13 +572,13 @@ void WinSettingCommon::setAutoStartBtn(Ling::Button* btn)
     auto isAutoStart = setting->getAutoStart();
     if (isAutoStart) {
         btn->setText(L"\ue688");
-        btn->setColor(0x597ef7ff);
-        btn->setHoverColor(0x597ef7ff);
+        btn->setColor(Theme::t(0x597ef7ff));
+        btn->setHoverColor(Theme::t(0x597ef7ff));
     }
     else {
         btn->setText(L"\ue687");
-        btn->setColor(0x666666FF);
-        btn->setHoverColor(0x666666FF);
+        btn->setColor(Theme::t(0x666666FF));
+        btn->setHoverColor(Theme::t(0x666666FF));
     }
 }
 
@@ -549,16 +614,18 @@ void WinSettingCommon::showSelectBox(Ling::Button* btn)
     selectBox->setPositionType(Ling::Position::Absolute);
     selectBox->setPosition(Ling::Edge::Left, btn->x/win->dpi);
     selectBox->setPosition(Ling::Edge::Top, btn->y/win->dpi);
-    selectBox->setBg(0xFFFFFFFF);
-    selectBox->setBorder(1.f, 0x597ef766);
+    selectBox->setBg(Theme::c(0xFFFFFFFF));
+    selectBox->setBorder(1.f, Theme::c(0x597ef766));
     for (auto& pair:langs)
     {
         auto btn = selectBox->makeChild<Ling::Button>();
+        btn->setColor(Theme::t(0x333333FF));
+        btn->setHoverColor(Theme::t(0x333333FF));
         btn->setText(pair.first);
         btn->setHeight(itemH);
         btn->setWidthPercent(100.f);
-        btn->setHoverBg(0Xf2f2f2FF);
-        btn->setHoverColor(0X000000FF);
+        btn->setHoverBg(Theme::c(0Xf2f2f2FF));
+        btn->setHoverColor(Theme::t(0X000000FF));
         btn->onClick.add([this](Ling::Button* btn) {
             auto lang = Lang::get();
             auto langName = btn->getText();
@@ -577,11 +644,13 @@ void WinSettingCommon::showSelectBox(Ling::Button* btn)
         });
     }
     auto lastItem = selectBox->makeChild<Ling::Button>();
+    lastItem->setColor(Theme::t(0x333333FF));
+    lastItem->setHoverColor(Theme::t(0x333333FF));
     lastItem->setText(Lang::get(L"setting.getMoreLang"));
     lastItem->setHeight(itemH);
     lastItem->setWidthPercent(100.f);
-    lastItem->setHoverBg(0Xf2f2f2FF);
-    lastItem->setHoverColor(0X000000FF);
+    lastItem->setHoverBg(Theme::c(0Xf2f2f2FF));
+    lastItem->setHoverColor(Theme::t(0X000000FF));
     lastItem->onClick.add([this](Ling::Button* btn) {
         win->onMouseDown.remove(onMouseDownToken);
         std::wstring downloadUrl{ L"https://github.com/xland/ScreenCapture/tree/main/Lang" };

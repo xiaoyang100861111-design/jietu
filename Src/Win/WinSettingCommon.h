@@ -13,6 +13,7 @@ private:
 	void initAutoStartCtrls();
 	void initLangCtrls();
 	void initThemeCtrls();
+	void initDarkCtrls();
 	void initClipCtrls();
 	void initUpdateCtrls();
 	void initEngineCtrls();

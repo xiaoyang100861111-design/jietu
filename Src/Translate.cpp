@@ -13,6 +13,8 @@
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Windows.Web.Http.h>
 #include <winrt/Windows.Web.Http.Headers.h>
+#include <winrt/Windows.Web.Http.Filters.h>
+#include <winrt/Windows.Security.Cryptography.Certificates.h>
 #include "Translate.h"
 #include "Setting.h"
 #include "Lang.h"
@@ -652,32 +654,62 @@ namespace {
 	void msTranslate(const HttpClient& client, const std::wstring& target, std::vector<Translate::Block>& blocks, std::wstring& srcLang)
 	{
 		auto auth = getBingAuth(client);
-		// 这个接口单次最多收一千字左右
-		for (auto [from, to] : makeBatches(blocks, 900)) {
+		// 发一段文字过去，拿回译文
+		auto request = [&](const std::wstring& text) {
 			auto url = std::format(L"https://{}/ttranslatev3?isVertical=1&&IG={}&IID=translator.5023", auth.host, auth.ig);
 			auto form = std::format(L"fromLang=auto-detect&to={}&token={}&key={}&text={}", target,
-				std::wstring{ Uri::EscapeComponent(auth.token) }, auth.key,
-				std::wstring{ Uri::EscapeComponent(joinLines(blocks, from, to)) });
+				std::wstring{ Uri::EscapeComponent(auth.token) }, auth.key, std::wstring{ Uri::EscapeComponent(text) });
 			HttpRequestMessage req{ HttpMethod::Post(), Uri{ url } };
 			req.Content(HttpStringContent{ form, UnicodeEncoding::Utf8, L"application/x-www-form-urlencoded" });
 			req.Headers().TryAppendWithoutValidation(L"Referer", L"https://" + auth.host + L"/translator");
 			auto resp = waitOp(client.SendRequestAsync(req), 15);
 			resp.EnsureSuccessStatusCode();
-			std::wstring text{ waitOp(resp.Content().ReadAsStringAsync(), 15) };
+			std::wstring body{ waitOp(resp.Content().ReadAsStringAsync(), 15) };
 			// 正常是个数组：[{"translations":[{"text":"…"}]}]。出错（要验证码、凭据过期）时是个对象
 			JsonArray arr{ nullptr };
-			if (!JsonArray::TryParse(text, arr) || arr.Size() == 0) fail(L"bing: " + text.substr(0, 160));
+			if (!JsonArray::TryParse(body, arr) || arr.Size() == 0) fail(L"bing: " + body.substr(0, 160));
 			if (srcLang.empty()) {
 				if (auto det = arr.GetObjectAt(0).GetNamedObject(L"detectedLanguage", nullptr)) srcLang = std::wstring{ det.GetNamedString(L"language", L"") };
 			}
 			auto trans = arr.GetObjectAt(0).GetNamedArray(L"translations");
-			splitLines(std::wstring{ trans.GetObjectAt(0).GetNamedString(L"text") }, blocks, from, to);
+			return std::wstring{ trans.GetObjectAt(0).GetNamedString(L"text") };
+		};
+		// 这个接口单次最多收一千字左右。几段用换行连起来一起发，回来按换行拆开
+		for (auto [from, to] : makeBatches(blocks, 900)) {
+			auto all = request(joinLines(blocks, from, to));
+			// 它有时会把两行并成一行（或者多拆出一行），行数就对不上了：那这一批改成一段一段单独翻
+			if (to - from > 1 && static_cast<size_t>(std::count(all.begin(), all.end(), L'\n')) + 1 != to - from) {
+				for (size_t i = from; i < to; i++) blocks[i].dst = request(blocks[i].src);
+				continue;
+			}
+			splitLines(all, blocks, from, to);
 		}
 	}
 
-	// 腾讯交互翻译。它的语言代码是自己的一套
-	void tencentTranslate(const HttpClient& client, const std::wstring& target, std::vector<Translate::Block>& blocks, std::wstring& srcLang)
+	// 腾讯那边的 HTTPS 证书过期了（2026-10-11 到期没续），正常校验会直接连不上。
+	// 给它单独开一个"证书过期也照连"的客户端：只放过"过期"这一种，域名不对、不受信任的照样拒绝；
+	// 发过去的只是要翻译的那几句话
+	struct FilterClientHolder {
+		HttpClient client;
+		explicit FilterClientHolder(const winrt::Windows::Web::Http::Filters::HttpBaseProtocolFilter& filter) : client{ filter } {}
+	};
+	HttpClient& tencentClient()
 	{
+		static FilterClientHolder* holder = []() {
+			winrt::Windows::Web::Http::Filters::HttpBaseProtocolFilter filter;
+			filter.IgnorableServerCertificateErrors().Append(winrt::Windows::Security::Cryptography::Certificates::ChainValidationResult::Expired);
+			auto ptr = new FilterClientHolder(filter);
+			ptr->client.DefaultRequestHeaders().UserAgent().TryParseAdd(
+				L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
+			return ptr;
+		}();
+		return holder->client;
+	}
+
+	// 腾讯交互翻译。它的语言代码是自己的一套
+	void tencentTranslate(const HttpClient&, const std::wstring& target, std::vector<Translate::Block>& blocks, std::wstring& srcLang)
+	{
+		auto& client = tencentClient();
 		std::wstring lang = target.starts_with(L"zh-Hant") ? L"zh-TW" : target.starts_with(L"zh") ? L"zh" : target;
 		GUID guid{};
 		CoCreateGuid(&guid);
@@ -718,8 +750,78 @@ namespace {
 		}
 	}
 
-	// Google 的免密钥接口一次只收一段文本，所以把各段用换行连起来一起发，回来再按换行拆开
+	// Google 的"一段一个 q"接口：各段分开翻、分开认语言，不用自己按换行拆。
+	// 返回 [["译文","原文语言"],…]，和发过去的段一一对应
+	void googleMulti(const HttpClient& client, const std::wstring& urlBase, const std::wstring& target,
+		std::vector<Translate::Block>& blocks, std::wstring& srcLang)
+	{
+		std::wstring tl = target == L"zh-Hans" ? L"zh-CN" : target == L"zh-Hant" ? L"zh-TW" : target;
+		std::wstring form;
+		for (auto& block : blocks) {
+			if (!form.empty()) form += L'&';
+			form += L"q=" + std::wstring{ Uri::EscapeComponent(block.src) };
+		}
+		HttpRequestMessage req{ HttpMethod::Post(), Uri{ urlBase + tl } };
+		req.Content(HttpStringContent{ form, UnicodeEncoding::Utf8, L"application/x-www-form-urlencoded" });
+		auto resp = waitOp(client.SendRequestAsync(req), 12);
+		resp.EnsureSuccessStatusCode();
+		std::wstring text{ waitOp(resp.Content().ReadAsStringAsync(), 12) };
+		JsonArray root{ nullptr };
+		if (!JsonArray::TryParse(text, root) || root.Size() == 0) fail(L"google: " + text.substr(0, 160));
+		std::vector<std::wstring> out;
+		// 哪种语言的原文最多，就算是哪种语言
+		std::unordered_map<std::wstring, size_t> votes;
+		auto take = [&](const JsonArray& item, size_t index) {
+			if (item.Size() == 0 || item.GetAt(0).ValueType() != JsonValueType::String) fail(L"google: " + text.substr(0, 160));
+			out.push_back(std::wstring{ item.GetStringAt(0) });
+			if (item.Size() > 1 && item.GetAt(1).ValueType() == JsonValueType::String && index < blocks.size())
+				votes[std::wstring{ item.GetStringAt(1) }] += blocks[index].src.size();
+		};
+		if (root.GetAt(0).ValueType() == JsonValueType::String) {
+			take(root, 0);   //只发一段时，有的版本直接回 ["译文","语言"]
+		}
+		else {
+			for (uint32_t i = 0; i < root.Size(); i++) {
+				auto item = root.GetAt(i);
+				if (item.ValueType() == JsonValueType::Array) take(item.GetArray(), i);
+				else if (item.ValueType() == JsonValueType::String) out.push_back(std::wstring{ item.GetString() });
+				else fail(L"google: " + text.substr(0, 160));
+			}
+		}
+		if (out.size() != blocks.size()) fail(std::format(L"google: sent {}, got {}", blocks.size(), out.size()));
+		for (size_t i = 0; i < blocks.size(); i++) blocks[i].dst = out[i];
+		size_t best{ 0 };
+		for (auto& [lang, count] : votes) {
+			if (count > best) {
+				best = count;
+				srcLang = lang;
+			}
+		}
+	}
+
+	void googleJoined(const HttpClient& client, const std::wstring& target, std::vector<Translate::Block>& blocks, std::wstring& srcLang);
+
+	// 谷歌有好几个入口，限流是各算各的（一个回 429 "请求太多"，另一个往往还能用）：挨个试
 	void googleTranslate(const HttpClient& client, const std::wstring& target, std::vector<Translate::Block>& blocks, std::wstring& srcLang)
+	{
+		static const wchar_t* multiUrls[]{
+			L"https://translate.googleapis.com/translate_a/t?client=gtx&sl=auto&tl=",
+			L"https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=auto&tl=",
+		};
+		for (auto url : multiUrls) {
+			try {
+				googleMulti(client, url, target, blocks, srcLang);
+				return;
+			}
+			catch (...) {
+				Log::write(std::wstring{ L"WARN google (" } + url + L"): " + Log::describe());
+			}
+		}
+		googleJoined(client, target, blocks, srcLang);   //最后一个入口：失败就把它的错误报出去
+	}
+
+	// 老办法：这个入口一次只收一段文本，所以把各段用换行连起来一起发，回来再按换行拆开
+	void googleJoined(const HttpClient& client, const std::wstring& target, std::vector<Translate::Block>& blocks, std::wstring& srcLang)
 	{
 		std::wstring tl = target == L"zh-Hans" ? L"zh-CN" : target == L"zh-Hant" ? L"zh-TW" : target;
 		std::wstring joined;
@@ -752,7 +854,7 @@ namespace {
 			if (pos == std::wstring::npos) break;
 			start = pos + 1;
 		}
-		if (parts.size() != blocks.size()) throw winrt::hresult_error(E_FAIL);
+		if (parts.size() != blocks.size()) fail(std::format(L"google: line count mismatch: sent {}, got {}", blocks.size(), parts.size()));
 		for (size_t i = 0; i < blocks.size(); i++) blocks[i].dst = parts[i];
 	}
 

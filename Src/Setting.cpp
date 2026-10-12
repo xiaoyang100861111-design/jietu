@@ -1,4 +1,5 @@
 ﻿#include "pch.h"
+#include "MsgBox.h"
 #include <include/Ling.h>
 #include "Setting.h"
 #include "Util.h"
@@ -221,6 +222,20 @@ void Setting::setClipSize(float w, float h)
     }
     common.SetNamedValue(L"clipW", JsonValue::CreateNumberValue(w));
     common.SetNamedValue(L"clipH", JsonValue::CreateNumberValue(h));
+    save();
+}
+
+bool Setting::getDarkMode()
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    return common && common.GetNamedBoolean(L"darkMode", false);
+}
+
+void Setting::setDarkMode(bool val)
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) return;
+    common.SetNamedValue(L"darkMode", JsonValue::CreateBooleanValue(val));
     save();
 }
 
