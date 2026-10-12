@@ -1110,6 +1110,104 @@ void WinClip::onPunchClick(const std::wstring& id)
 	});
 }
 
+void WinClip::paintRow(ID2D1DeviceContext* ctx, const Row& row, int index, float y)
+{
+	const UINT theme = Setting::get()->getThemeColor();
+	const float pad = 10.f * dpi;
+	auto& item = *row.item;
+	const bool isHover = hoverIndex == index && hover >= Hit::Row && hover <= Hit::Btn2;
+	if (index == selRow) {
+		brush->SetColor(D2D1::ColorF(theme, 0.12f));
+		ctx->FillRectangle(D2D1::RectF(0.f, y, w, y + row.height), brush.Get());
+	}
+	else if (isHover) {
+		brush->SetColor(D2D1::ColorF(0x000000, 0.05f));
+		ctx->FillRectangle(D2D1::RectF(0.f, y, w, y + row.height), brush.Get());
+	}
+	const float left = pad + 4.f * dpi;
+	const float right = btnRect(y, row.height, 2).left - 6.f * dpi; //右边留给三个小按钮
+	// 剪切板页每行底下有一行小字（复制的时间、字数 / 尺寸）；话术页不要这行，地方全让给备注和内容
+	const bool hasMeta = mode == Clip;
+	const float metaTop = y + row.height - (hasMeta ? 22.f : 7.f) * dpi;
+	auto mainRect = D2D1::RectF(left, y + 8.f * dpi, right, metaTop);
+	std::wstring meta = timeStr(item.id);
+	auto addMeta = [&meta](const std::wstring& part) {
+		if (part.empty()) return;
+		if (!meta.empty()) meta += L"   ";
+		meta += part;
+	};
+	// 有备注名的：第一行是备注（红字，一眼认出是哪条），内容在它下面；没有的话内容占满
+	auto drawMain = [&](const std::wstring& content) {
+		if (item.title.empty()) {
+			drawText(ctx, content, 13.f, mainRect, 0x222222);
+			return;
+		}
+		const float mid = mainRect.top + 20.f * dpi;
+		drawText(ctx, item.title, 13.f, D2D1::RectF(mainRect.left, mainRect.top, mainRect.right, mid), 0xE64340);
+		drawText(ctx, content, 13.f, D2D1::RectF(mainRect.left, mid, mainRect.right, mainRect.bottom), 0x222222);
+	};
+	if (item.type == ClipHistory::Type::Text) {
+		drawMain(preview(item.text, 200));
+		addMeta(std::format(L"{} {}", item.text.size(), Lang::get(L"clip.chars")));
+	}
+	else if (item.type == ClipHistory::Type::Files) {
+		// 只显示文件名，多个文件用逗号隔开；完整路径放在下面那行小字里
+		std::wstring names, first;
+		int count{ 0 };
+		size_t start{ 0 };
+		while (start <= item.text.size()) {
+			auto pos = item.text.find(L'\n', start);
+			auto file = item.text.substr(start, pos == std::wstring::npos ? pos : pos - start);
+			if (!file.empty()) {
+				if (count == 0) first = file;
+				if (count < 6) names += (names.empty() ? L"" : L"，") + fileName(file);
+				count++;
+			}
+			if (pos == std::wstring::npos) break;
+			start = pos + 1;
+		}
+		drawMain(L"📄 " + names);
+		addMeta(count > 1 ? std::format(L"{} {}", count, Lang::get(L"clip.fileCount")) : first);
+	}
+	else {
+		// 图片：有备注名的话备注占第一行（红字），缩略图摆在它下面
+		addMeta(std::format(L"{} × {}", item.imgW, item.imgH));
+		if (!item.title.empty()) {
+			const float mid = mainRect.top + 20.f * dpi;
+			drawText(ctx, item.title, 13.f, D2D1::RectF(mainRect.left, mainRect.top, mainRect.right, mid), 0xE64340);
+			mainRect.top = mid;
+		}
+		if (auto thumb = getThumb(item)) {
+			// 等比缩进主区域里，靠左摆
+			auto size = thumb->GetSize();
+			const float boxW = mainRect.right - mainRect.left, boxH = mainRect.bottom - mainRect.top;
+			const float scale = (std::min)({ boxW / size.width, boxH / size.height, 1.f });
+			auto dest = D2D1::RectF(mainRect.left, mainRect.top, mainRect.left + size.width * scale, mainRect.top + size.height * scale);
+			ctx->DrawBitmap(thumb, dest, 1.f, D2D1_INTERPOLATION_MODE_LINEAR);
+			brush->SetColor(D2D1::ColorF(0x000000, 0.12f));
+			ctx->DrawRectangle(dest, brush.Get(), 1.f);
+		}
+	}
+	if (hasMeta) drawText(ctx, meta, 11.f, D2D1::RectF(left, metaTop, right, y + row.height - 4.f * dpi), 0x999999, false, true);
+	// 右边的小按钮，平时淡淡地显示，光标移上去才加深。
+	// 话术页：✕ 删除、✎ 编辑、⇄ 换分组；剪切板页：✕ 删除、☆ 收藏、＋ 存为话术
+	auto btnColor = [&](Hit which, UINT hoverRgb) -> UINT {
+		return isHover && hover == which ? hoverRgb : 0xBBBBBB;
+	};
+	drawText(ctx, L"✕", 12.f, btnRect(y, row.height, 0), btnColor(Hit::Btn0, 0xE64340), true, true);
+	if (mode == Phrase) {
+		drawText(ctx, L"✎", 14.f, btnRect(y, row.height, 1), btnColor(Hit::Btn1, 0x555555), true, true);
+		drawText(ctx, L"⇄", 14.f, btnRect(y, row.height, 2), btnColor(Hit::Btn2, theme), true, true);
+	}
+	else {
+		drawText(ctx, item.pinned ? L"★" : L"☆", 15.f, btnRect(y, row.height, 1),
+			item.pinned ? theme : btnColor(Hit::Btn1, 0x555555), true, true);
+		drawText(ctx, L"＋", 15.f, btnRect(y, row.height, 2), btnColor(Hit::Btn2, theme), true, true);
+	}
+	brush->SetColor(D2D1::ColorF(0xEBEBED));
+	ctx->FillRectangle(D2D1::RectF(pad, y + row.height - dpi, w - pad, y + row.height), brush.Get());
+}
+
 WinClip::Hit WinClip::hitTest(POINT pos, int& index)
 {
 	index = -1;
