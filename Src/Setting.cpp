@@ -564,7 +564,7 @@ std::wstring Setting::getTranslateEngine()
     auto obj = configObj.GetNamedObject(L"translate", nullptr);
     if (!obj) return L"google";
     std::wstring val{ obj.GetNamedString(L"engine", L"google") };
-    return val == L"microsoft" || val == L"tencent" ? val : L"google";
+    return val == L"microsoft" || val == L"yandex" || val == L"alibaba" ? val : L"google";
 }
 
 void Setting::setTranslateEngine(const std::wstring& val)

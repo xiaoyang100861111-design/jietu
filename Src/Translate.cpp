@@ -13,8 +13,6 @@
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Windows.Web.Http.h>
 #include <winrt/Windows.Web.Http.Headers.h>
-#include <winrt/Windows.Web.Http.Filters.h>
-#include <winrt/Windows.Security.Cryptography.Certificates.h>
 #include "Translate.h"
 #include "Setting.h"
 #include "Lang.h"
@@ -36,8 +34,6 @@ namespace {
 	// 微软：必应翻译网页版用的接口。（原先用的是 Edge 浏览器的那个免密钥接口，
 	// 它取令牌的地址 edge.microsoft.com/translate/auth 已经下线了，返回 404）
 	constexpr std::wstring_view bingPageUrl{ L"https://www.bing.com/translator" };
-	// 腾讯交互翻译的网页接口：国内直连，Google / 必应都到不了的网络下靠它兜底
-	constexpr std::wstring_view tencentUrl{ L"https://transmart.qq.com/api/imt" };
 	constexpr std::wstring_view googleUrl{ L"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&dt=t&tl=" };
 
 	// OCR 认出来的一行
@@ -686,67 +682,107 @@ namespace {
 		}
 	}
 
-	// 腾讯那边的 HTTPS 证书过期了（2026-10-11 到期没续），正常校验会直接连不上。
-	// 给它单独开一个"证书过期也照连"的客户端：只放过"过期"这一种，域名不对、不受信任的照样拒绝；
-	// 发过去的只是要翻译的那几句话
-	struct FilterClientHolder {
-		HttpClient client;
-		explicit FilterClientHolder(const winrt::Windows::Web::Http::Filters::HttpBaseProtocolFilter& filter) : client{ filter } {}
-	};
-	HttpClient& tencentClient()
+	// Yandex 翻译（它手机 App 用的那个接口，不用密钥）。一次可以发好几段，回来的译文和发过去的一一对应
+	HttpClient& yandexClient()
 	{
-		static FilterClientHolder* holder = []() {
-			winrt::Windows::Web::Http::Filters::HttpBaseProtocolFilter filter;
-			filter.IgnorableServerCertificateErrors().Append(winrt::Windows::Security::Cryptography::Certificates::ChainValidationResult::Expired);
-			auto ptr = new FilterClientHolder(filter);
-			ptr->client.DefaultRequestHeaders().UserAgent().TryParseAdd(
-				L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
+		static ClientHolder* holder = []() {
+			auto ptr = new ClientHolder();
+			ptr->client.DefaultRequestHeaders().UserAgent().TryParseAdd(L"ru.yandex.translate/3.20.2024");
 			return ptr;
 		}();
 		return holder->client;
 	}
-
-	// 腾讯交互翻译。它的语言代码是自己的一套
-	void tencentTranslate(const HttpClient&, const std::wstring& target, std::vector<Translate::Block>& blocks, std::wstring& srcLang)
+	std::wstring newHexId()
 	{
-		auto& client = tencentClient();
-		std::wstring lang = target.starts_with(L"zh-Hant") ? L"zh-TW" : target.starts_with(L"zh") ? L"zh" : target;
 		GUID guid{};
 		CoCreateGuid(&guid);
-		wchar_t guidStr[40]{};
-		StringFromGUID2(guid, guidStr, 40);
-		std::wstring id{ guidStr };
-		std::erase_if(id, [](wchar_t c) { return c == L'{' || c == L'}'; });
-		const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::system_clock::now().time_since_epoch()).count();
-		for (auto [from, to] : makeBatches(blocks, 4000)) {
-			JsonArray list;
-			for (size_t i = from; i < to; i++) list.Append(JsonValue::CreateStringValue(blocks[i].src));
-			JsonObject header, source, dest, body;
-			header.SetNamedValue(L"fn", JsonValue::CreateStringValue(L"auto_translation"));
-			header.SetNamedValue(L"client_key", JsonValue::CreateStringValue(
-				std::format(L"browser-chrome-126.0.0-Windows_10-{}-{}", id, ms)));
-			source.SetNamedValue(L"lang", JsonValue::CreateStringValue(L"auto"));
-			source.SetNamedValue(L"text_list", list);
-			dest.SetNamedValue(L"lang", JsonValue::CreateStringValue(lang));
-			body.SetNamedValue(L"header", header);
-			body.SetNamedValue(L"type", JsonValue::CreateStringValue(L"plain"));
-			body.SetNamedValue(L"model_category", JsonValue::CreateStringValue(L"normal"));
-			body.SetNamedValue(L"source", source);
-			body.SetNamedValue(L"target", dest);
-			HttpRequestMessage req{ HttpMethod::Post(), Uri{ tencentUrl } };
-			req.Content(HttpStringContent{ body.Stringify(), UnicodeEncoding::Utf8, L"application/json" });
-			req.Headers().TryAppendWithoutValidation(L"Referer", L"https://transmart.qq.com/zh-CN/index");
+		wchar_t buf[40]{};
+		StringFromGUID2(guid, buf, 40);
+		std::wstring id{ buf };
+		std::erase_if(id, [](wchar_t c) { return c == L'{' || c == L'}' || c == L'-'; });
+		std::transform(id.begin(), id.end(), id.begin(), [](wchar_t c) { return (wchar_t)towlower(c); });
+		return id;
+	}
+	void yandexTranslate(const HttpClient&, const std::wstring& target, std::vector<Translate::Block>& blocks, std::wstring& srcLang)
+	{
+		auto& client = yandexClient();
+		std::wstring lang = target.starts_with(L"zh") ? L"zh" : target;
+		static const std::wstring session = newHexId();   //它要一个会话号，整个进程用同一个
+		const auto url = std::format(L"https://translate.yandex.net/api/v1/tr.json/translate?id={}-0-0&srv=android", session);
+		for (auto [from, to] : makeBatches(blocks, 3000)) {
+			std::wstring form = L"lang=" + lang;
+			for (size_t i = from; i < to; i++) form += L"&text=" + std::wstring{ Uri::EscapeComponent(blocks[i].src) };
+			HttpRequestMessage req{ HttpMethod::Post(), Uri{ url } };
+			req.Content(HttpStringContent{ form, UnicodeEncoding::Utf8, L"application/x-www-form-urlencoded" });
 			auto resp = waitOp(client.SendRequestAsync(req), 15);
-			resp.EnsureSuccessStatusCode();
 			std::wstring text{ waitOp(resp.Content().ReadAsStringAsync(), 15) };
+			// {"code":200,"lang":"bs-zh","text":["…","…"]}；出错时 code 不是 200，带一句 message
 			JsonObject obj{ nullptr };
-			if (!JsonObject::TryParse(text, obj)) fail(L"tencent: " + text.substr(0, 160));
-			if (srcLang.empty() && obj.HasKey(L"src_lang") && obj.GetNamedValue(L"src_lang").ValueType() == JsonValueType::String)
-				srcLang = std::wstring{ obj.GetNamedString(L"src_lang") };
-			auto arr = obj.GetNamedArray(L"auto_translation", nullptr);
-			if (!arr || arr.Size() != to - from) fail(L"tencent: " + text.substr(0, 160));
+			if (!JsonObject::TryParse(text, obj) || obj.GetNamedNumber(L"code", 0) != 200) fail(L"yandex: " + text.substr(0, 160));
+			auto arr = obj.GetNamedArray(L"text", nullptr);
+			if (!arr || arr.Size() != to - from) fail(L"yandex: " + text.substr(0, 160));
 			for (uint32_t i = 0; i < arr.Size(); i++) blocks[from + i].dst = std::wstring{ arr.GetStringAt(i) };
+			if (srcLang.empty()) {
+				std::wstring pair{ obj.GetNamedString(L"lang", L"") };   // "原文语言-译文语言"
+				if (auto pos = pair.find(L'-'); pos != std::wstring::npos) srcLang = pair.substr(0, pos);
+			}
+		}
+	}
+
+	// 阿里翻译（translate.alibaba.com 网页用的接口）。先要一个防伪令牌，再带着它发请求；一次只收一段文字
+	struct AliAuth {
+		std::wstring token, param, header;
+		std::chrono::steady_clock::time_point time{};
+	};
+	AliAuth aliAuth;
+	AliAuth getAliAuth(const HttpClient& client)
+	{
+		std::lock_guard lock{ tokenMutex };
+		auto now = std::chrono::steady_clock::now();
+		if (!aliAuth.token.empty() && now - aliAuth.time < std::chrono::minutes(10)) return aliAuth;
+		auto resp = waitOp(client.GetAsync(Uri{ L"https://translate.alibaba.com/api/translate/csrftoken" }), 12);
+		resp.EnsureSuccessStatusCode();
+		std::wstring text{ waitOp(resp.Content().ReadAsStringAsync(), 12) };
+		JsonObject obj{ nullptr };
+		if (!JsonObject::TryParse(text, obj)) fail(L"alibaba: " + text.substr(0, 160));
+		AliAuth auth;
+		auth.token = std::wstring{ obj.GetNamedString(L"token", L"") };
+		auth.param = std::wstring{ obj.GetNamedString(L"parameterName", L"_csrf") };
+		auth.header = std::wstring{ obj.GetNamedString(L"headerName", L"") };
+		if (auth.token.empty()) fail(L"alibaba: no token: " + text.substr(0, 160));
+		auth.time = now;
+		aliAuth = auth;
+		return auth;
+	}
+	void alibabaTranslate(const HttpClient& client, const std::wstring& target, std::vector<Translate::Block>& blocks, std::wstring& srcLang)
+	{
+		auto auth = getAliAuth(client);
+		std::wstring lang = target == L"zh-Hant" ? L"zh-tw" : target.starts_with(L"zh") ? L"zh" : target;
+		auto request = [&](const std::wstring& query) {
+			auto form = std::format(L"srcLang=auto&tgtLang={}&domain=general&{}={}&query={}", lang, auth.param,
+				std::wstring{ Uri::EscapeComponent(auth.token) }, std::wstring{ Uri::EscapeComponent(query) });
+			HttpRequestMessage req{ HttpMethod::Post(), Uri{ L"https://translate.alibaba.com/api/translate/text" } };
+			req.Content(HttpStringContent{ form, UnicodeEncoding::Utf8, L"application/x-www-form-urlencoded" });
+			req.Headers().TryAppendWithoutValidation(L"Referer", L"https://translate.alibaba.com/");
+			if (!auth.header.empty()) req.Headers().TryAppendWithoutValidation(auth.header, auth.token);
+			auto resp = waitOp(client.SendRequestAsync(req), 15);
+			std::wstring text{ waitOp(resp.Content().ReadAsStringAsync(), 15) };
+			// {"success":true,"data":{"translateText":"…","detectLanguage":"ka"}}
+			JsonObject obj{ nullptr };
+			if (!JsonObject::TryParse(text, obj) || !obj.GetNamedBoolean(L"success", false)) fail(L"alibaba: " + text.substr(0, 160));
+			auto data = obj.GetNamedObject(L"data", nullptr);
+			if (!data) fail(L"alibaba: " + text.substr(0, 160));
+			if (srcLang.empty()) srcLang = std::wstring{ data.GetNamedString(L"detectLanguage", L"") };
+			return std::wstring{ data.GetNamedString(L"translateText", L"") };
+		};
+		// 几段用换行连起来一起发，回来按换行拆开；行数对不上就这一批一段一段单独翻
+		for (auto [from, to] : makeBatches(blocks, 1500)) {
+			auto all = request(joinLines(blocks, from, to));
+			if (to - from > 1 && static_cast<size_t>(std::count(all.begin(), all.end(), L'\n')) + 1 != to - from) {
+				for (size_t i = from; i < to; i++) blocks[i].dst = request(blocks[i].src);
+				continue;
+			}
+			splitLines(all, blocks, from, to);
 		}
 	}
 
@@ -858,19 +894,20 @@ namespace {
 		for (size_t i = 0; i < blocks.size(); i++) blocks[i].dst = parts[i];
 	}
 
-	// engine：用户选的那一家（google / microsoft / tencent）先试，不通再挨个试另外两家。
+	// engine：用户选的那一家（google / microsoft / yandex / alibaba）先试，不通再挨个试其余几家。
 	// 全都不通就把每一家各自的错误原因带出去
 	void translate(const std::wstring& target, std::vector<Translate::Block>& blocks, const std::wstring& engine, std::wstring& srcLang)
 	{
 		auto& client = sharedClient();
-		std::vector<std::wstring> order{ L"google", L"microsoft", L"tencent" };
+		std::vector<std::wstring> order{ L"google", L"microsoft", L"yandex", L"alibaba" };
 		if (auto it = std::find(order.begin(), order.end(), engine); it != order.end()) std::rotate(order.begin(), it, it + 1);
 		std::wstring detail;
 		for (auto& name : order) {
 			try {
 				if (name == L"google") googleTranslate(client, target, blocks, srcLang);
 				else if (name == L"microsoft") msTranslate(client, target, blocks, srcLang);
-				else tencentTranslate(client, target, blocks, srcLang);
+				else if (name == L"yandex") yandexTranslate(client, target, blocks, srcLang);
+				else alibabaTranslate(client, target, blocks, srcLang);
 				return;
 			}
 			catch (...) {
@@ -892,7 +929,7 @@ namespace {
 	struct Options {
 		std::wstring target;        // 目标语言
 		bool googleOcr{ true };     // 文字识别用 Google（否则用系统自带的）
-		std::wstring engine{ L"google" }; // 翻译先用哪家：google / microsoft / tencent
+		std::wstring engine{ L"google" }; // 翻译先用哪家：google / microsoft / yandex / alibaba
 	};
 
 	void work(int w, int h, const std::vector<BYTE>& pixels, bool needTranslate, const Options& opt, Translate::Result& result)
@@ -1060,7 +1097,7 @@ void Translate::start(int w, int h, const std::vector<BYTE>& pixels, bool needTr
 // 与 WinPin::getImagePixels 同一套做法（SetTarget → BeginDraw → EndDraw → SetTarget(nullptr) 闭环）
 std::wstring Translate::langTitle(const Result& result)
 {
-	// 三家接口的语言代码写法不一样（谷歌 zh-CN / iw，微软 zh-Hans / sr-Cyrl / nb，腾讯 zh），先归成一种再去取名字。
+	// 几家接口的语言代码写法不一样（谷歌 zh-CN / iw，微软 zh-Hans / sr-Cyrl / nb，Yandex 和阿里 zh / hbs），先归成一种再去取名字。
 	// 名字表（langName）是谷歌和微软两家支持的全部语言合起来的，键一律小写
 	auto nameOf = [](std::wstring code) {
 		if (code.empty()) return Lang::get(L"langName.auto");
