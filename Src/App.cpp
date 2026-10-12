@@ -10,6 +10,7 @@
 #include "./Win/WinClip.h"
 #include "./Win/WinPhraseEdit.h"
 #include "ClipHistory.h"
+#include "Punch.h"
 #include "Log.h"
 #include <shobjidl.h>
 #include <shlguid.h>
@@ -88,6 +89,7 @@ void App::dispose()
     WinPhraseEdit::dispose();
     WinClip::dispose();
     ClipHistory::dispose();
+    Punch::dispose();
     Lang::dispose();
     Setting::dispose();
     app.reset();
@@ -174,6 +176,9 @@ App::App()
         SetTimer(nullptr, 0, 1500, onWarmTimer);
         ensureDesktopShortcut();
         ClipHistory::init(); //常驻托盘时才记剪切板历史，用完即走的那种进程不记
+        Punch::init();
+        // 活动超时了：把面板叫出来提醒
+        Punch::get()->onOvertime = [](const std::wstring& text) { WinClip::alertPunch(text); };
         WinClip::applyDock();
         Update::checkOnStart();
 		// 开机自启不启动截图；--enter=tray 也一样，升级完重启新版本走的就是它 ——

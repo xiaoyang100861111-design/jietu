@@ -15,6 +15,7 @@ namespace {
 	static constexpr UINT delayMsg = 166;
 	static constexpr UINT clipMsg = 167;
 	static constexpr UINT phraseMsg = 168;
+	static constexpr UINT punchMsg = 169;
 
 	void CALLBACK onDelayTimer(HWND, UINT, UINT_PTR id, DWORD)
 	{
@@ -67,6 +68,7 @@ void Tray::onTrayRightClick()
 	AppendMenu(menu, MF_STRING, capMsg, Lang::get(L"tray.cap").data());
 	AppendMenu(menu, MF_STRING, delayMsg, Lang::get(L"tray.delay").data());
 	AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+	AppendMenu(menu, MF_STRING, punchMsg, Lang::get(L"tray.punch").data());
 	AppendMenu(menu, MF_STRING, phraseMsg, Lang::get(L"tray.phrase").data());
 	AppendMenu(menu, MF_STRING, clipMsg, Lang::get(L"tray.clip").data());
 	AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
@@ -84,6 +86,10 @@ void Tray::onTrayRightClick()
 	else if (menuId == clipMsg)
 	{
 		WinClip::toggle(WinClip::Clip);
+	}
+	else if (menuId == punchMsg)
+	{
+		WinClip::toggle(WinClip::Work);
 	}
 	else if (menuId == phraseMsg)
 	{

@@ -2,7 +2,9 @@ name: build
 
 on:
   push:
-    branches: [main]
+    # main：正式版，编完发到 dist 分支，用户的软件会收到升级提示。
+    # dev：试用版，只出一个预发布的下载包，不动 dist，不会触发任何人的自动升级
+    branches: [main, dev]
   workflow_dispatch:
 
 permissions:
@@ -10,7 +12,7 @@ permissions:
 
 # 连着推了好几次时只编最新的那一次，前面还没编完的直接取消
 concurrency:
-  group: build
+  group: build-${{ github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -135,6 +137,7 @@ jobs:
       # https://github.com/<仓库>/raw/dist/UU截图.exe 下载下来文件名就是中文的，而且永远是最新一版。
       # 分支每次强推成只有一个提交，不让仓库越来越大
       - name: Publish to dist branch
+        if: github.ref_name == 'main'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -164,7 +167,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: UU截图 ${{ env.BUILD_VERSION }} (build ${{ github.run_number }})
+          name: UU截图 ${{ env.BUILD_VERSION }} (build ${{ github.run_number }})${{ github.ref_name != 'main' && ' 试用版' || '' }}
+          prerelease: ${{ github.ref_name != 'main' }}
+          target_commitish: ${{ github.sha }}
           body_path: Doc/update-notes.txt
           files: |
             x64/Release/UUjietu.exe

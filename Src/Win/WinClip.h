@@ -14,7 +14,8 @@
 class WinClip : public Ling::WinBase
 {
 public:
-	enum Mode { Phrase = 0, Clip = 1 };
+	// 三个页签。打卡排最前面（叫 Work 是为了不和 Punch 这个类重名）
+	enum Mode { Work = 0, Phrase = 1, Clip = 2 };
 	~WinClip();
 	// 快捷键 / 托盘菜单：没开就按 mode 打开；开着且就是这个页签就关掉，是另一个页签就切过去
 	static void toggle(int mode);
@@ -24,6 +25,8 @@ public:
 	static void applyDock();
 	// 别的窗口（添加 / 编辑话术的小窗口）开着的时候面板会失焦，这期间不许它缩回去
 	static void setModal(bool val);
+	// 打卡的活动超时了：把面板叫出来切到打卡页，红字提示并闪一下
+	static void alertPunch(const std::wstring& text);
 	// 退出流程里调，同其他窗口：别留给 CoUninitialize 之后的静态析构
 	static void dispose();
 private:
@@ -44,7 +47,7 @@ private:
 		bool selected{ false };
 	};
 	// 光标落在什么东西上。Btn0~2 是一行右边的小按钮，Top0~2 是窗口右上角的按钮，都从右往左数
-	enum class Hit { None, Mode, Tab, Clear, Row, Btn0, Btn1, Btn2, Top0, Top1, Top2 };
+	enum class Hit { None, Mode, Tab, Clear, Row, Btn0, Btn1, Btn2, Top0, Top1, Top2, PunchBtn };
 	// 搜索框现在在收什么：平时是搜索词，新建 / 重命名分组时临时借用它
 	enum class Input { Search, Group, Rename };
 	WinClip(HWND prevHwnd, int mode, int edge, bool byHotkey);
@@ -58,6 +61,11 @@ private:
 	void setMode(int val);
 	void paint(ID2D1DeviceContext* ctx);
 	void paintRow(ID2D1DeviceContext* ctx, const Row& row, int index, float y);
+	// 打卡页整页的内容：状态卡、操作按钮、今日统计、今日记录
+	void paintPunch(ID2D1DeviceContext* ctx);
+	void paintToast(ID2D1DeviceContext* ctx);
+	// 点了打卡页上的某个按钮。id：in 上班 / out 下班 / back 回座 / act:<活动 id>
+	void onPunchClick(const std::wstring& id);
 	void drawText(ID2D1DeviceContext* ctx, const std::wstring& text, float fontSize, const D2D1_RECT_F& rect,
 		UINT rgb, bool hCenter = false, bool vCenter = false);
 	float textWidth(const std::wstring& text, float fontSize);
@@ -88,7 +96,8 @@ private:
 	void beginInput(Input kind, const std::wstring& init = L"");
 	void endInput(bool commit);
 	// 底部弹一句提示，过一会儿自己消失
-	void toast(const std::wstring& text);
+	// warn：出错 / 警告用红字，其余用绿字
+	void toast(const std::wstring& text, UINT ms = 1000, bool warn = false);
 	// 关窗一律排进消息队列：很多入口是在失焦 / 鼠标回调里，原地销毁窗口不安全
 	void requestClose();
 	// 用户拖完窗口松手了：看看停在哪，贴边还是悬浮，并记进配置
@@ -128,6 +137,14 @@ private:
 	std::wstring inputParent; // 新建 / 重命名分组时，它的上一级分组（空 = 一级分组）
 	std::wstring inputOld;    // 重命名分组时它原来的名字
 	std::wstring toastText;
+	bool toastWarn{ false };
+	// 打卡页上这一帧画出来的按钮（位置每帧算，点击时照着这张表认）
+	struct PunchBtn {
+		D2D1_RECT_F rect{};
+		std::wstring id;
+		bool enabled{ true };
+	};
+	std::vector<PunchBtn> punchBtns;
 	bool closing{ false };
 	// 正开着菜单 / 确认框 / 编辑窗口：这期间面板会失焦，但不能因此缩回去
 	bool modal{ false };

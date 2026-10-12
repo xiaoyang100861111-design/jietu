@@ -170,6 +170,7 @@
     <ClCompile Include="App.cpp" />
     <ClCompile Include="Log.cpp" />
     <ClCompile Include="ClipHistory.cpp" />
+    <ClCompile Include="Punch.cpp" />
     <ClCompile Include="Win\WinClip.cpp" />
     <ClCompile Include="Win\WinPhraseEdit.cpp" />
     <ClCompile Include="History.cpp" />
@@ -272,6 +273,7 @@
     <ClInclude Include="Translate.h" />
     <ClInclude Include="Log.h" />
     <ClInclude Include="ClipHistory.h" />
+    <ClInclude Include="Punch.h" />
     <ClInclude Include="Win\WinClip.h" />
     <ClInclude Include="Win\WinPhraseEdit.h" />
     <ClInclude Include="Tray.h" />

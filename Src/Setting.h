@@ -42,6 +42,9 @@ public:
 	void setUpdateEnabled(bool val);
 	std::wstring getUpdateIgnore();
 	void setUpdateIgnore(const std::wstring& version);
+	// 面板上次停在哪个页签（0 打卡 1 话术 2 剪切板）
+	int getClipMode();
+	void setClipMode(int val);
 	int getDockEdge();
 	void setDockEdge(int val);
 	int getMouseTrigger();
