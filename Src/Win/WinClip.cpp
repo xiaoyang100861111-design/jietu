@@ -281,7 +281,7 @@ void WinClip::openDocked(int edge)
 	winClip.reset(new WinClip(prev, Setting::get()->getClipMode(), edge, false));
 }
 
-void WinClip::show()
+void WinClip::popup()
 {
 	if (!winClip) {
 		toggle(Setting::get()->getClipMode());

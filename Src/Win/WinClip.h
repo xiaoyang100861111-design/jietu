@@ -22,7 +22,8 @@ public:
 	// 鼠标顶到屏幕边触发的贴边滑出。edge：1 左 2 上 3 右 4 下
 	static void openDocked(int edge);
 	// 点托盘图标：没开就打开（停在上次的页签），开着就提到最前面闪一下
-	static void show();
+	// （不能叫 show：那会把基类的 show() 盖住，onCreated 里显示窗口的那句就变成调它，没完没了地建窗口）
+	static void popup();
 	// 软件启动时：面板是"固定"的话直接显示出来（不抢焦点）
 	static void showAtStartup();
 	// 按设置里的贴边选项启停"鼠标顶边"的监视。启动时、改设置后调

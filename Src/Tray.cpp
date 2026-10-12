@@ -32,7 +32,7 @@ Tray::Tray()
 	// 左键、右键点托盘图标都是把面板（打卡 / 话术 / 剪切板）叫出来。
 	// 设置窗口从面板右上角的齿轮进，退出软件在设置的"关于"页里
 	lingApp->onTrayMouseEvent.add([this](bool isDown, bool isRight) {
-		if (isDown) WinClip::show();
+		if (isDown) WinClip::popup();
 	});
 }
 
