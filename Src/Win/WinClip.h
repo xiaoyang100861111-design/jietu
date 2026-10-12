@@ -21,6 +21,10 @@ public:
 	static void toggle(int mode);
 	// 鼠标顶到屏幕边触发的贴边滑出。edge：1 左 2 上 3 右 4 下
 	static void openDocked(int edge);
+	// 点托盘图标：没开就打开（停在上次的页签），开着就提到最前面闪一下
+	static void show();
+	// 软件启动时：面板是"固定"的话直接显示出来（不抢焦点）
+	static void showAtStartup();
 	// 按设置里的贴边选项启停"鼠标顶边"的监视。启动时、改设置后调
 	static void applyDock();
 	// 别的窗口（添加 / 编辑话术的小窗口）开着的时候面板会失焦，这期间不许它缩回去
@@ -47,7 +51,7 @@ private:
 		bool selected{ false };
 	};
 	// 光标落在什么东西上。Btn0~2 是一行右边的小按钮，Top0~2 是窗口右上角的按钮，都从右往左数
-	enum class Hit { None, Mode, Tab, Clear, Row, Btn0, Btn1, Btn2, Top0, Top1, Top2, PunchBtn };
+	enum class Hit { None, Mode, Tab, Clear, Row, Btn0, Btn1, Btn2, Top0, Top1, Top2, Top3, PunchBtn };
 	// 搜索框现在在收什么：平时是搜索词，新建 / 重命名分组时临时借用它
 	enum class Input { Search, Group, Rename };
 	WinClip(HWND prevHwnd, int mode, int edge, bool byHotkey);

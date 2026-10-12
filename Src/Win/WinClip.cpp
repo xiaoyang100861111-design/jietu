@@ -8,6 +8,7 @@
 #include "WinCap.h"
 #include "WinPhraseEdit.h"
 #include "WinPunchJoin.h"
+#include "WinSetting.h"
 #include "../Lang.h"
 #include "../Setting.h"
 #include "../Punch.h"
@@ -280,6 +281,35 @@ void WinClip::openDocked(int edge)
 	winClip.reset(new WinClip(prev, Setting::get()->getClipMode(), edge, false));
 }
 
+void WinClip::show()
+{
+	if (!winClip) {
+		toggle(Setting::get()->getClipMode());
+		return;
+	}
+	if (winClip->closing || !winClip->hwnd) return;
+	// 已经开着：多半是被别的窗口盖住了，提上来闪两下让人看见
+	auto hwnd = winClip->hwnd;
+	ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+	SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	SetForegroundWindow(hwnd);
+	FLASHWINFO flash{};
+	flash.cbSize = sizeof(flash);
+	flash.hwnd = hwnd;
+	flash.dwFlags = FLASHW_ALL;
+	flash.uCount = 2;
+	flash.dwTimeout = 120;
+	FlashWindowEx(&flash);
+}
+
+void WinClip::showAtStartup()
+{
+	if (winClip || !ClipHistory::get()) return;
+	auto setting = Setting::get();
+	if (!setting->getClipPinned()) return;
+	winClip.reset(new WinClip(GetForegroundWindow(), setting->getClipMode(), setting->getDockEdge(), false));
+}
+
 void WinClip::applyDock()
 {
 	const int edge = Setting::get()->getDockEdge();
@@ -439,7 +469,7 @@ void WinClip::onTextEdit(const std::wstring& text)
 void WinClip::onMinMaxInfo(MINMAXINFO* mmi)
 {
 	// 再小标签和按钮就挤不下了
-	mmi->ptMinTrackSize.x = (LONG)(300.f * dpi);
+	mmi->ptMinTrackSize.x = (LONG)(390.f * dpi);
 	mmi->ptMinTrackSize.y = (LONG)(260.f * dpi);
 }
 
@@ -454,7 +484,7 @@ LRESULT WinClip::onHitTest(const POINT pos)
 	if (pt.y >= 0 && pt.y < (LONG)(42.f * dpi)) {
 		const float px = (float)pt.x;
 		const bool onModes = px >= 10.f * dpi && px < (10.f + modeTabW * modeCount) * dpi;
-		const bool onBtns = px >= topBtnRect(2).left - 4.f * dpi;
+		const bool onBtns = px >= topBtnRect(3).left - 4.f * dpi;
 		if (!onModes && !onBtns) return HTCAPTION;
 	}
 	return HTCLIENT;
@@ -487,7 +517,7 @@ D2D1_RECT_F WinClip::btnRect(float rowY, float rowH, int which) const
 	return D2D1::RectF(right - size, top, right, top + size);
 }
 
-// 窗口右上角的按钮，从右往左：0 关闭、1 固定、2 添加内容（只有话术页有）
+// 窗口右上角的按钮，从右往左：0 关闭、1 固定、2 设置、3 添加内容（只有话术页有）
 D2D1_RECT_F WinClip::topBtnRect(int which) const
 {
 	const float size = 28.f * dpi;
@@ -747,7 +777,9 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 	topBtn(0, Hit::Top0, L"✕", 13.f, hover == Hit::Top0 ? 0xE64340 : 0x777777, false);
 	// 固定：按下去是亮的（主题色、带底色）
 	topBtn(1, Hit::Top1, L"📌", 13.f, pinned ? theme : 0x999999, pinned);
-	if (mode == Phrase) topBtn(2, Hit::Top2, L"＋", 16.f, theme, false);
+	// 设置：软件的设置窗口只从这里进
+	topBtn(2, Hit::Top2, L"⚙", 15.f, hover == Hit::Top2 ? 0x333333 : 0x999999, false);
+	if (mode == Phrase) topBtn(3, Hit::Top3, L"＋", 16.f, theme, false);
 	if (mode == Work) {
 		paintPunch(ctx);
 		paintToast(ctx);
@@ -1219,7 +1251,8 @@ WinClip::Hit WinClip::hitTest(POINT pos, int& index)
 	if (py < 42.f * dpi) {
 		if (inRect(topBtnRect(0))) return Hit::Top0;
 		if (inRect(topBtnRect(1))) return Hit::Top1;
-		if (mode == Phrase && inRect(topBtnRect(2))) return Hit::Top2;
+		if (inRect(topBtnRect(2))) return Hit::Top2;
+		if (mode == Phrase && inRect(topBtnRect(3))) return Hit::Top3;
 		const float modeW = modeTabW * dpi;
 		const int i = (int)((px - pad) / modeW);
 		if (py >= 8.f * dpi && py < 38.f * dpi && px >= pad && i >= 0 && i < modeCount) {
@@ -1347,6 +1380,9 @@ void WinClip::onDown(POINT pos, bool isRight)
 		toast(Lang::get(pinned ? L"clip.pinOn" : L"clip.pinOff"));
 	}
 	else if (hit == Hit::Top2) {
+		WinSetting::init();
+	}
+	else if (hit == Hit::Top3) {
 		WinPhraseEdit::open(curGroup());
 	}
 	else if (hit == Hit::Tab) {

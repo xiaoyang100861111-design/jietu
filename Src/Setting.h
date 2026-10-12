@@ -48,6 +48,18 @@ public:
 	// 打卡：加入团队后服务端发的令牌。空 = 还没加入
 	std::wstring getPunchToken();
 	void setPunchToken(const std::wstring& token);
+	// —— 账号与配置同步（见 Sync）——
+	// 登录后服务端发的令牌、账号名，以及本机手里的配置是服务端的第几版
+	std::wstring getAccountToken();
+	std::wstring getAccountName();
+	long long getSyncVersion();
+	// 两个都给空串 = 退出登录
+	void setAccount(const std::wstring& token, const std::wstring& name);
+	void setSyncVersion(long long version);
+	// 要传到服务端的配置：整份配置去掉"只属于这台电脑"的那几项（账号本身、窗口位置大小、开机自启等）
+	std::wstring exportForSync();
+	// 把服务端的配置装进来。"只属于这台电脑"的那几项保留本机现在的值。JSON 不合法返回 false
+	bool importFromSync(const std::wstring& json);
 	int getDockEdge();
 	void setDockEdge(int val);
 	int getMouseTrigger();

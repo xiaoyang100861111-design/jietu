@@ -7,7 +7,7 @@
 
 WinSettingAbout::WinSettingAbout(Ling::WinBase* parent):Ling::Node(parent)
 {
-    std::vector<std::wstring> keys = { L"version",L"project",L"update" };
+    std::vector<std::wstring> keys = { L"version",L"project",L"update",L"exit" };
     for (auto& key : keys)
     {
         auto box = makeChild<Ling::Node>();
@@ -29,6 +29,18 @@ WinSettingAbout::WinSettingAbout(Ling::WinBase* parent):Ling::Node(parent)
         }
         else if (key == L"project") {
             btn->setText(L"UU截图");
+        }
+        else if (key == L"exit") {
+            // 托盘图标现在左右键都是唤出面板，退出软件放在这里
+            btn->setText(Lang::get(L"about.exitApp"));
+            btn->setColor(0xE64340FF);
+            btn->setHoverColor(0xE64340FF);
+            btn->onClick.add([](Ling::Button*) {
+                if (MessageBox(nullptr, Lang::get(L"about.exitAsk").data(), L"UU截图",
+                    MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2 | MB_TOPMOST | MB_SETFOREGROUND) == IDYES) {
+                    Ling::App::get()->quit(0);
+                }
+            });
         }
         else {
             btn->setText(Lang::get(L"about.checkUpdate"));

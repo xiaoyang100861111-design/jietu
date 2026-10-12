@@ -9,6 +9,7 @@
 #include "WinSettingShortcut.h"
 #include "WinSettingAbout.h"
 #include "WinSettingData.h"
+#include "WinSettingAccount.h"
 
 std::unique_ptr<WinSetting> winSetting;
 
@@ -168,7 +169,7 @@ void WinSetting::onCreated()
 }
 void WinSetting::initMenuItems(Ling::Node* menuBox)
 {
-	for (size_t i = 0; i < 4; i++)
+	for (size_t i = 0; i < 5; i++)
 	{
 		auto menuItem = menuBox->makeChild<Ling::Button>();
 		menuItem->setFontSize(14.f);
@@ -189,8 +190,11 @@ void WinSetting::initMenuItems(Ling::Node* menuBox)
 			else if (i == 2) {
 				menuItem->setText(Lang::get(L"setting.about"));
 			}
-			else {
+			else if (i == 3) {
 				menuItem->setText(Lang::get(L"setting.dataDir"));
+			}
+			else {
+				menuItem->setText(Lang::get(L"setting.account"));
 			}
 		}
 		menuItem->onClick.add([this](auto menuItem) {this->onMenuItemClick(menuItem);});
@@ -227,8 +231,11 @@ void WinSetting::onMenuItemClick(Ling::Button* menuItem)
 	else if (menuIndex == 2) {
 		content = body->makeChild<WinSettingAbout>();
 	}
-	else {
+	else if (menuIndex == 3) {
 		content = body->makeChild<WinSettingData>();
+	}
+	else {
+		content = body->makeChild<WinSettingAccount>();
 	}
 	content->setFlexGrow(1.0);
 	content->setHeightPercent(100.f);
@@ -274,8 +281,8 @@ LRESULT WinSetting::onHitTest(const POINT pos)
 		return HTCAPTION;
 	}
 	// 左边菜单下面的空白也能拖窗口。起点要在最后一个菜单项之下：
-	// 顶上留白 40 + 四个菜单项各 40（原来按三项算，第四项"配置目录"就被当成标题栏，点不到）
-	if (pt.x > 0 && pt.y > 40 * 5 * dpi && pt.x < 120 * dpi && pt.y < h) {
+	// 顶上留白 40 + 五个菜单项各 40（原来按三项算，第四项"配置目录"就被当成标题栏，点不到）
+	if (pt.x > 0 && pt.y > 40 * 6 * dpi && pt.x < 120 * dpi && pt.y < h) {
 		return HTCAPTION;
 	}
 	return HTCLIENT;

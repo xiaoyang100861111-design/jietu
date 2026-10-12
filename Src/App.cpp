@@ -12,6 +12,7 @@
 #include "./Win/WinPunchJoin.h"
 #include "ClipHistory.h"
 #include "Punch.h"
+#include "Sync.h"
 #include "Log.h"
 #include <shobjidl.h>
 #include <shlguid.h>
@@ -83,6 +84,7 @@ void App::dispose()
 {
     // 窗口对象是文件级静态变量，交给静态析构就晚了（那时 CoUninitialize 已经跑完），
     // 所以趁这里把还开着的窗口先放掉
+    Sync::dispose();
     keepAlive.reset();
     WinPin::dispose();
     WinCap::dispose();
@@ -166,6 +168,8 @@ App::App()
     app->onBeforeQuit.add([]() { WinCap::stopIfRecording(); });
     Setting::init();
     Log::init();
+    // 登录着账号的话，先把服务端较新的配置拉下来，再让下面的模块去读配置
+    if (app->args[L"--auto-quit"] != L"true") Sync::init();
     Lang::init();
     if (app->args[L"--auto-quit"] == L"true") {
         WinCap::init();
@@ -181,6 +185,11 @@ App::App()
         Punch::init();
         // 活动超时了：把面板叫出来提醒
         Punch::get()->onOvertime = [](const std::wstring& text) { WinClip::alertPunch(text); };
+        // 面板是"固定"的（默认就是）：启动后直接显示出来。稍等一下再开，让上面这些先就位
+        SetTimer(nullptr, 0, 900, [](HWND, UINT, UINT_PTR id, DWORD) {
+            KillTimer(nullptr, id);
+            WinClip::showAtStartup();
+        });
         WinClip::applyDock();
         Update::checkOnStart();
 		// 开机自启不启动截图；--enter=tray 也一样，升级完重启新版本走的就是它 ——

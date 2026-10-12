@@ -29,14 +29,10 @@ Tray::Tray()
 	auto lingApp = Ling::App::get();
 	lingApp->initTray(100, L"UU截图");
 	Setting::get()->initShortcutKeys();
-	// 左键点托盘图标打开设置窗口（截图只走快捷键 / 右键菜单），右键出菜单
+	// 左键、右键点托盘图标都是把面板（打卡 / 话术 / 剪切板）叫出来。
+	// 设置窗口从面板右上角的齿轮进，退出软件在设置的"关于"页里
 	lingApp->onTrayMouseEvent.add([this](bool isDown, bool isRight) {
-		if (isDown && isRight) {
-			this->onTrayRightClick();
-		}
-		else if (isDown) {
-			WinSetting::init();
-		}
+		if (isDown) WinClip::show();
 	});
 }
 

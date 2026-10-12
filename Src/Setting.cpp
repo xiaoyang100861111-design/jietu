@@ -227,7 +227,8 @@ void Setting::setClipSize(float w, float h)
 bool Setting::getClipPinned()
 {
     auto common = configObj.GetNamedObject(L"common", nullptr);
-    return common && common.GetNamedBoolean(L"clipPinned", false);
+    // 没设置过的默认是固定的：面板一直显示着，不自己缩回去
+    return !common || common.GetNamedBoolean(L"clipPinned", true);
 }
 
 void Setting::setClipPinned(bool val)
@@ -334,11 +335,92 @@ void Setting::setPunchToken(const std::wstring& token)
     save();
 }
 
+namespace {
+    // common 里"只属于这台电脑"的键：不上传，从服务端装配置时也保留本机的值
+    constexpr const wchar_t* localKeys[]{ L"clipX", L"clipY", L"clipW", L"clipH", L"autoStart", L"updateIgnore", L"updateCheckDay" };
+}
+
+std::wstring Setting::getAccountToken()
+{
+    auto obj = configObj.GetNamedObject(L"account", nullptr);
+    return obj ? std::wstring{ obj.GetNamedString(L"token", L"") } : L"";
+}
+
+std::wstring Setting::getAccountName()
+{
+    auto obj = configObj.GetNamedObject(L"account", nullptr);
+    return obj ? std::wstring{ obj.GetNamedString(L"username", L"") } : L"";
+}
+
+long long Setting::getSyncVersion()
+{
+    auto obj = configObj.GetNamedObject(L"account", nullptr);
+    return obj ? static_cast<long long>(obj.GetNamedNumber(L"version", 0)) : 0;
+}
+
+void Setting::setAccount(const std::wstring& token, const std::wstring& name)
+{
+    JsonObject obj;
+    obj.SetNamedValue(L"token", JsonValue::CreateStringValue(token));
+    obj.SetNamedValue(L"username", JsonValue::CreateStringValue(name));
+    obj.SetNamedValue(L"version", JsonValue::CreateNumberValue(0));
+    configObj.SetNamedValue(L"account", obj);
+    save();
+}
+
+void Setting::setSyncVersion(long long version)
+{
+    auto obj = configObj.GetNamedObject(L"account", nullptr);
+    if (!obj) return;
+    obj.SetNamedValue(L"version", JsonValue::CreateNumberValue(static_cast<double>(version)));
+    save();
+}
+
+std::wstring Setting::exportForSync()
+{
+    // 先抄一份再删，别动正在用的那份
+    auto copy = JsonObject::Parse(configObj.Stringify());
+    if (copy.HasKey(L"account")) copy.Remove(L"account");
+    if (auto common = copy.GetNamedObject(L"common", nullptr)) {
+        for (auto key : localKeys) {
+            if (common.HasKey(key)) common.Remove(key);
+        }
+    }
+    return std::wstring{ copy.Stringify() };
+}
+
+bool Setting::importFromSync(const std::wstring& json)
+{
+    JsonObject remote{ nullptr };
+    if (!JsonObject::TryParse(json, remote)) return false;
+    // 本机独有的那几项从现在的配置里搬过去（重新解析一遍得到独立的值，不和旧对象共用）
+    if (auto account = configObj.GetNamedObject(L"account", nullptr)) {
+        remote.SetNamedValue(L"account", JsonObject::Parse(account.Stringify()));
+    }
+    auto remoteCommon = remote.GetNamedObject(L"common", nullptr);
+    if (!remoteCommon) {
+        remoteCommon = JsonObject();
+        remote.SetNamedValue(L"common", remoteCommon);
+    }
+    if (auto common = configObj.GetNamedObject(L"common", nullptr)) {
+        for (auto key : localKeys) {
+            if (common.HasKey(key)) remoteCommon.SetNamedValue(key, JsonValue::Parse(common.GetNamedValue(key).Stringify()));
+            else if (remoteCommon.HasKey(key)) remoteCommon.Remove(key);
+        }
+    }
+    // 语言是必须有的一项，服务端那份万一没有就沿用本机的
+    if (!remoteCommon.HasKey(L"language")) remoteCommon.SetNamedValue(L"language", JsonValue::CreateStringValue(getLang()));
+    configObj = remote;
+    save();
+    return true;
+}
+
 int Setting::getDockEdge()
 {
     auto common = configObj.GetNamedObject(L"common", nullptr);
-    if (!common) return 0;
-    auto val = static_cast<int>(common.GetNamedNumber(L"dockEdge", 0));
+    if (!common) return 3;
+    // 没设置过的默认贴屏幕右边
+    auto val = static_cast<int>(common.GetNamedNumber(L"dockEdge", 3));
     return val >= 0 && val <= 4 ? val : 0;
 }
 
