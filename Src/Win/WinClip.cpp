@@ -1468,10 +1468,12 @@ void WinClip::loadLedgerBill(bool mine)
 			self->ledgerFailed = false;
 			self->ledgerText = std::wstring{ obj.GetNamedString(L"text", L"") };
 			self->ledgerHasBill = self->parseBill(obj);
+			self->ledgerHasLog = false;
 		}
 		else {
 			self->ledgerFailed = true;
 			self->ledgerHasBill = false;
+			self->ledgerHasLog = false;
 			self->ledgerText = status == 0 ? Lang::get(L"punch.errNet") : std::wstring{ obj ? obj.GetNamedString(L"error", L"") : L"" };
 		}
 		self->scrollY = 0.f;
@@ -1489,7 +1491,21 @@ void WinClip::loadLedgerLog()
 		const bool ok = status == 200 && JsonObject::TryParse(text, obj);
 		self->ledgerFailed = !ok;
 		self->ledgerHasBill = false;
+		self->ledgerHasLog = false;
+		self->llogs.clear();
 		self->ledgerText = ok ? std::wstring{ obj.GetNamedString(L"text", L"") } : Lang::get(status == 0 ? L"punch.errNet" : L"punch.errServer");
+		// 有一条条的数据就按条排版；没有（老版本的服务端）还是显示上面那段文字
+		if (ok) {
+			if (auto arr = obj.GetNamedArray(L"rows", nullptr)) {
+				for (uint32_t i = 0; i < arr.Size(); i++) {
+					if (arr.GetAt(i).ValueType() != JsonValueType::Object) continue;
+					auto item = arr.GetObjectAt(i);
+					self->llogs.push_back({ std::wstring{ item.GetNamedString(L"time", L"") }, std::wstring{ item.GetNamedString(L"actor", L"") },
+						std::wstring{ item.GetNamedString(L"action", L"") }, std::wstring{ item.GetNamedString(L"detail", L"") } });
+				}
+				self->ledgerHasLog = true;
+			}
+		}
 		self->scrollY = 0.f;
 		self->refresh();
 	});
@@ -1699,6 +1715,166 @@ void WinClip::paintBill(ID2D1DeviceContext* ctx, const D2D1_RECT_F& card)
 	contentH = y + scrollY - card.top + inner;
 }
 
+void WinClip::paintLog(ID2D1DeviceContext* ctx, const D2D1_RECT_F& card)
+{
+	const float inner = 16.f * dpi, left = card.left + inner, right = card.right - inner;
+	const UINT theme = Setting::get()->getThemeColor();
+	float y = card.top + inner - scrollY;
+	// 画一段不折行的字，返回宽度
+	auto text = [&](const std::wstring& str, float size, UINT rgb, bool bold, float x, float top, float lineH) {
+		auto layout = Ling::D2D::makeTextLayout(str, size * dpi);
+		if (!layout) return 0.f;
+		layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+		if (bold) layout->SetFontWeight(DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_RANGE{ 0, (UINT32)str.size() });
+		DWRITE_TEXT_METRICS tm{};
+		layout->GetMetrics(&tm);
+		brush->SetColor(col(rgb));
+		ctx->DrawTextLayout(D2D1::Point2F(x, top + (lineH - tm.height) / 2.f), layout.Get(), brush.Get());
+		return tm.widthIncludingTrailingWhitespace;
+	};
+	text(Lang::get(L"ledger.btnLog"), 15.f, 0x222222, true, left, y, 24.f * dpi);
+	text(std::format(L"{} {}", llogs.size(), Lang::get(L"ledger.logCount")), 12.f, 0x999999, false,
+		left + textWidth(Lang::get(L"ledger.btnLog"), 15.f) + 14.f * dpi, y, 24.f * dpi);
+	y += 36.f * dpi;
+	if (llogs.empty()) {
+		text(Lang::get(L"ledger.logEmpty"), 13.f, 0xAAAAAA, false, left, y, 30.f * dpi);
+		y += 30.f * dpi;
+	}
+	for (auto& item : llogs) {
+		// 第一行：操作（彩色标签）、操作人，时间靠右
+		const float lineH = 26.f * dpi;
+		// 记入款绿、记下发红、撤销和删除橙，改设置 / 权限这些用主题色
+		const bool undo = item.action.find(L"撤销") != std::wstring::npos || item.action.find(L"删除") != std::wstring::npos;
+		const UINT rgb = undo ? 0xFA8C16 : item.action.find(L"入款") != std::wstring::npos ? 0x12A150
+			: item.action.find(L"下发") != std::wstring::npos ? 0xE64340 : theme;
+		const float chipW = textWidth(item.action, 12.f) + 16.f * dpi;
+		auto chip = D2D1::RectF(left, y + 3.f * dpi, left + chipW, y + lineH - 3.f * dpi);
+		brush->SetColor(D2D1::ColorF(rgb, 0.13f));
+		ctx->FillRoundedRectangle(D2D1::RoundedRect(chip, 5.f * dpi, 5.f * dpi), brush.Get());
+		text(item.action, 12.f, rgb, false, left + 8.f * dpi, y, lineH);
+		text(item.actor, 13.f, 0x333333, true, left + chipW + 10.f * dpi, y, lineH);
+		const float timeW = textWidth(item.time, 12.f);
+		text(item.time, 12.f, 0x999999, false, right - timeW, y, lineH);
+		y += lineH + 4.f * dpi;
+		// 第二行起：具体内容，放不下就折行
+		if (!item.detail.empty()) {
+			if (auto layout = Ling::D2D::makeTextLayout(item.detail, 12.5f * dpi, right - left)) {
+				layout->SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, 20.f * dpi, 15.f * dpi);
+				DWRITE_TEXT_METRICS tm{};
+				layout->GetMetrics(&tm);
+				brush->SetColor(col(0x555555));
+				ctx->DrawTextLayout(D2D1::Point2F(left, y), layout.Get(), brush.Get());
+				y += tm.height;
+			}
+		}
+		// 条与条之间留空，再隔一条细线
+		y += 12.f * dpi;
+		brush->SetColor(col(0xEDEDEF));
+		ctx->DrawLine(D2D1::Point2F(left, y), D2D1::Point2F(right, y), brush.Get(), dpi);
+		y += 12.f * dpi;
+	}
+	contentH = y + scrollY - card.top + inner;
+}
+
+bool WinClip::paintPairs(ID2D1DeviceContext* ctx, const D2D1_RECT_F& card)
+{
+	// 拆成一行行的"名称：内容"。有一行不是这个样子（或者行数太多、根本没有字），就不归这里管
+	std::vector<std::pair<std::wstring, std::wstring>> pairs;
+	std::wstring title;
+	size_t start{ 0 };
+	while (start <= ledgerText.size()) {
+		auto end = ledgerText.find(L'\n', start);
+		auto line = ledgerText.substr(start, end == std::wstring::npos ? end : end - start);
+		while (!line.empty() && (line.back() == L'\r' || line.back() == L' ')) line.pop_back();
+		if (!line.empty()) {
+			// 一行里可能用分号并排写了几项（"汇率：1；费率：1；日切：04:00"）
+			size_t from{ 0 };
+			bool any{ false };
+			while (from < line.size()) {
+				auto semi = line.find(L'；', from);
+				auto part = line.substr(from, semi == std::wstring::npos ? semi : semi - from);
+				auto colon = part.find(L'：');
+				if (colon == std::wstring::npos || colon == 0 || colon > 12) {
+					// 第一行可以是个标题（小组名），别的地方出现就说明不是这种格式
+					if (pairs.empty() && title.empty() && !any && semi == std::wstring::npos) title = part;
+					else return false;
+				}
+				else {
+					pairs.push_back({ part.substr(0, colon), part.substr(colon + 1) });
+					any = true;
+				}
+				if (semi == std::wstring::npos) break;
+				from = semi + 1;
+			}
+		}
+		if (end == std::wstring::npos) break;
+		start = end + 1;
+	}
+	if (pairs.empty() || pairs.size() > 12) return false;
+
+	const float inner = 16.f * dpi, left = card.left + inner, right = card.right - inner;
+	const UINT theme = Setting::get()->getThemeColor();
+	float y = card.top + inner - scrollY;
+	auto text = [&](const std::wstring& str, float size, UINT rgb, bool bold, float x, float top, float lineH) {
+		auto layout = Ling::D2D::makeTextLayout(str, size * dpi);
+		if (!layout) return;
+		layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+		if (bold) layout->SetFontWeight(DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_RANGE{ 0, (UINT32)str.size() });
+		DWRITE_TEXT_METRICS tm{};
+		layout->GetMetrics(&tm);
+		brush->SetColor(col(rgb));
+		ctx->DrawTextLayout(D2D1::Point2F(x, top + (lineH - tm.height) / 2.f), layout.Get(), brush.Get());
+	};
+	if (!title.empty()) {
+		text(title, 15.f, 0x222222, true, left, y, 24.f * dpi);
+		y += 36.f * dpi;
+	}
+	// 名称那一列的宽度：按最长的名称来，内容从它右边开始
+	float labelW{ 0.f };
+	for (auto& [label, value] : pairs) labelW = (std::max)(labelW, textWidth(label, 12.5f));
+	const float valueLeft = left + labelW + 20.f * dpi;
+	const float rowH = 30.f * dpi, gap = 6.f * dpi;
+	for (auto& [label, value] : pairs) {
+		text(label, 12.5f, 0x999999, false, left, y, rowH);
+		// 用顿号隔开的是一串名字：一个名字一个标签，一行放不下就折到下一行
+		std::vector<std::wstring> names;
+		size_t from{ 0 };
+		while (from <= value.size()) {
+			auto sep = value.find(L'、', from);
+			names.push_back(value.substr(from, sep == std::wstring::npos ? sep : sep - from));
+			if (sep == std::wstring::npos) break;
+			from = sep + 1;
+		}
+		if (names.size() > 1 || label.find(L"操作员") != std::wstring::npos || label.find(L"负责人") != std::wstring::npos) {
+			const bool none = names.size() == 1 && (names[0] == L"未设置" || names[0] == L"无");
+			float x = valueLeft;
+			for (auto& name : names) {
+				const float chipW = textWidth(name, 13.f) + 18.f * dpi;
+				if (x > valueLeft && x + chipW > right) {
+					x = valueLeft;
+					y += rowH;
+				}
+				auto chip = D2D1::RectF(x, y + 3.f * dpi, x + chipW, y + rowH - 3.f * dpi);
+				if (none) brush->SetColor(col(0xF0F0F2));
+				else brush->SetColor(D2D1::ColorF(theme, 0.12f));
+				ctx->FillRoundedRectangle(D2D1::RoundedRect(chip, 6.f * dpi, 6.f * dpi), brush.Get());
+				text(name, 13.f, none ? 0x999999 : theme, false, x + 9.f * dpi, y, rowH);
+				x += chipW + gap;
+			}
+		}
+		else {
+			// 开启 / 关闭这种：开着的绿色，关着的灰色，其余照常
+			const bool on = value == L"开启", off = value == L"关闭" || value == L"停止";
+			text(value, 13.5f, on ? 0x12A150 : off ? 0x999999 : 0x222222, on, valueLeft, y, rowH);
+		}
+		y += rowH + 8.f * dpi;
+		brush->SetColor(col(0xF0F0F2));
+		ctx->DrawLine(D2D1::Point2F(left, y - 4.f * dpi), D2D1::Point2F(right, y - 4.f * dpi), brush.Get(), dpi);
+	}
+	contentH = y + scrollY - card.top + inner;
+	return true;
+}
+
 void WinClip::sendLedger(const std::wstring& raw)
 {
 	// 掐掉两头的空白
@@ -1732,6 +1908,7 @@ void WinClip::sendLedger(const std::wstring& raw)
 		self->ledgerFailed = false;
 		self->ledgerText = text;
 		// 回的是账单就按账单排版；账单前面那句话（"已撤销 #3 · 100"）放到底下提示
+		self->ledgerHasLog = false;
 		self->ledgerHasBill = obj.HasKey(L"bill") && obj.GetNamedValue(L"bill").ValueType() == JsonValueType::Object
 			&& self->parseBill(obj.GetNamedObject(L"bill"));
 		std::wstring head{ obj.GetNamedString(L"head", L"") };
@@ -1865,6 +2042,12 @@ void WinClip::paintLedger(ID2D1DeviceContext* ctx)
 	ctx->PushAxisAlignedClip(D2D1::RectF(card.left, card.top + 2.f * dpi, card.right, card.bottom - 2.f * dpi), D2D1_ANTIALIAS_MODE_ALIASED);
 	if (ledgerHasBill) {
 		paintBill(ctx, card);
+	}
+	else if (ledgerHasLog) {
+		paintLog(ctx, card);
+	}
+	else if (!ledgerFailed && paintPairs(ctx, card)) {
+		// 已经按"名称：内容"排好了
 	}
 	else {
 		const float inner = 14.f * dpi;

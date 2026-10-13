@@ -99,6 +99,11 @@ private:
 	bool parseBill(const winrt::Windows::Data::Json::JsonObject& obj);
 	// 账单自己排版：金额、线路、会员 ID 分开显示，点哪个复制哪个
 	void paintBill(ctx_t ctx, const D2D1_RECT_F& card);
+	// 操作日志：一条一块，时间、操作（彩色标签）、操作人一行，具体内容另起一行
+	void paintLog(ctx_t ctx, const D2D1_RECT_F& card);
+	// "名称：内容"这种几行字的回复（显示操作员、配置）：排成左边名称、右边内容的表，人名一个一个做成标签。
+	// 不是这种格式的返回 false，照原样显示文字
+	bool paintPairs(ctx_t ctx, const D2D1_RECT_F& card);
 	void sendLedger(const std::wstring& text);
 	void drawText(ID2D1DeviceContext* ctx, const std::wstring& text, float fontSize, const D2D1_RECT_F& rect,
 		UINT rgb, bool hCenter = false, bool vCenter = false);
@@ -215,6 +220,12 @@ private:
 	};
 	LBill lbill;
 	bool ledgerHasBill{ false };
+	// 操作日志的一条。有日志时（ledgerHasLog）按它排版
+	struct LLog {
+		std::wstring time, actor, action, detail;
+	};
+	std::vector<LLog> llogs;
+	bool ledgerHasLog{ false };
 	std::wstring ledgerInput;     // 输入框里正在写的指令
 	float ledgerTop{ 0.f };       // 回复区域从哪儿开始（按钮排了几行不一定）
 	bool closing{ false };
