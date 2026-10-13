@@ -1515,6 +1515,15 @@ bool WinClip::parseBill(const JsonObject& obj)
 		};
 		rowsOf(L"incomes", bill.incomes);
 		rowsOf(L"expenses", bill.expenses);
+		// 老版本的服务端没有这一项，没有就不显示
+		if (auto arr = obj.GetNamedArray(L"periods", nullptr)) {
+			for (uint32_t i = 0; i < arr.Size(); i++) {
+				auto item = arr.GetObjectAt(i);
+				bill.periods.push_back({ std::wstring{ item.GetNamedString(L"name", L"") }, std::wstring{ item.GetNamedString(L"in", L"0") },
+					std::wstring{ item.GetNamedString(L"out", L"0") }, std::wstring{ item.GetNamedString(L"net", L"0") },
+					std::to_wstring(static_cast<int>(item.GetNamedNumber(L"count", 0))) });
+			}
+		}
 		lbill = std::move(bill);
 		return true;
 	}
@@ -1637,6 +1646,33 @@ void WinClip::paintBill(ID2D1DeviceContext* ctx, const D2D1_RECT_F& card)
 	y += 4.f * dpi;
 	const bool minus = lbill.net.starts_with(L"-");
 	pair({ Lang::get(L"ledger.net"), 14.f, 0x222222, true, L"", 0 }, { lbill.net, 19.f, minus ? red : green, true, lbill.net, 0 }, 36.f * dpi);
+
+	// 今日 / 昨日 / 本周 / 本月：一张小表，数字靠右对齐，点一下复制
+	if (!lbill.periods.empty()) {
+		y += 10.f * dpi;
+		const float rowH = 28.f * dpi, span = right - left;
+		// 四列数字的右边线：入款、下发、净收益、笔数
+		const float edges[4]{ left + span * 0.36f, left + span * 0.60f, left + span * 0.86f, right };
+		auto cell = [&](const Piece& piece, int column) {
+			drawPiece(piece, edges[column] - widthOf(piece), y, rowH);
+		};
+		drawPiece({ Lang::get(L"ledger.statTitle"), 12.f, 0x999999, false, L"", 0 }, left, y, rowH);
+		cell({ Lang::get(L"ledger.income"), 12.f, 0x999999, false, L"", 0 }, 0);
+		cell({ Lang::get(L"ledger.expense"), 12.f, 0x999999, false, L"", 0 }, 1);
+		cell({ Lang::get(L"ledger.net"), 12.f, 0x999999, false, L"", 0 }, 2);
+		cell({ Lang::get(L"ledger.unit"), 12.f, 0x999999, false, L"", 0 }, 3);
+		y += rowH;
+		hairline(0xEDEDEF);
+		for (auto& period : lbill.periods) {
+			drawPiece({ period.name, 13.f, 0x444444, false, L"", 0 }, left, y, rowH);
+			cell({ period.in, 13.f, green, false, period.in, 0 }, 0);
+			cell({ period.out, 13.f, red, false, period.out, 0 }, 1);
+			cell({ period.net, 13.f, period.net.starts_with(L"-") ? red : 0x222222, true, period.net, 0 }, 2);
+			cell({ period.count, 12.f, 0x999999, false, L"", 0 }, 3);
+			y += rowH;
+			hairline(0xF3F3F4);
+		}
+	}
 
 	// 净收益下面的统计（线路明细、会员统计…）和提示：原样的文字，小一号
 	if (!lbill.extra.empty()) {

@@ -204,6 +204,11 @@ private:
 		std::wstring title, sub, totalIn, totalOut, net, extra;
 		int inCount{ 0 }, outCount{ 0 };
 		std::vector<LRow> incomes, expenses;
+		// 今日 / 昨日 / 本周 / 本月的合计
+		struct Period {
+			std::wstring name, in, out, net, count;
+		};
+		std::vector<Period> periods;
 	};
 	LBill lbill;
 	bool ledgerHasBill{ false };
