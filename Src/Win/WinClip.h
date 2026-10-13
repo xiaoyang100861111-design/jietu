@@ -60,7 +60,7 @@ private:
 		bool selected{ false };
 	};
 	// 光标落在什么东西上。Btn0~2 是一行右边的小按钮，Top0~2 是窗口右上角的按钮，都从右往左数
-	enum class Hit { None, Mode, Tab, Clear, Row, Btn0, Btn1, Btn2, Top0, Top1, Top2, Top3, PunchBtn };
+	enum class Hit { None, Mode, Tab, Clear, Row, Btn0, Btn1, Btn2, Top0, Top1, Top2, Top3, PunchBtn, Admin };
 	// 搜索框现在在收什么：平时是搜索词，新建 / 重命名分组时临时借用它
 	enum class Input { Search, Group, Rename };
 	WinClip(HWND prevHwnd, int mode, int edge, bool byHotkey);
@@ -148,6 +148,8 @@ private:
 	std::wstring curGroup() const;
 	D2D1_RECT_F btnRect(float rowY, float rowH, int which) const;
 	D2D1_RECT_F topBtnRect(int which) const;
+	// 页签后面那个"管理后台"入口的位置。只有重要岗位的人有，没有时返回空矩形
+	D2D1_RECT_F adminLinkRect();
 	// 屏幕边缘外面、刚好看不见的那个位置（base 是贴边停好的位置）
 	POINT hiddenPos(POINT base) const;
 private:

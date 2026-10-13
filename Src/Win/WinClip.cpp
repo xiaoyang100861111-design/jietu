@@ -55,6 +55,7 @@ namespace {
 	constexpr UINT timerDock{ 1 }, timerToast{ 2 }, timerAnim{ 3 }, timerMoveEnd{ 4 }, timerPunch{ 5 };
 	constexpr float modeTabW{ 66.f };   //顶上每个页签的宽度（逻辑像素）
 	constexpr int modeCount{ 4 };
+	constexpr float minPanelW{ 470.f };  //面板最窄这么宽（逻辑像素）：四个页签 + "管理后台" + 右上角几个按钮要放得下
 	constexpr int animSteps{ 9 };   //滑动动画走几步，一步 15 毫秒
 	const wchar_t* clipTabKeys[5]{ L"clip.all", L"clip.text", L"clip.image", L"clip.files", L"clip.pinned" };
 
@@ -246,7 +247,7 @@ WinClip::WinClip(HWND prevHwnd, int mode, int edge, bool byHotkey) : Ling::WinBa
 	auto& work = mi.rcWork;
 	// 尺寸用上次拖出来的；高度没调过就从上到下占满工作区。都不超过工作区
 	auto [savedW, savedH] = setting->getClipSize();
-	setSize(savedW, savedH > 0.f ? savedH : 600.f);
+	setSize((std::max)(savedW, minPanelW), savedH > 0.f ? savedH : 600.f);
 	const float workW = (float)(work.right - work.left), workH = (float)(work.bottom - work.top);
 	if (savedH <= 0.f || h > workH) h = workH;
 	if (w > workW) w = workW;
@@ -571,7 +572,7 @@ void WinClip::onTextEdit(const std::wstring& text)
 void WinClip::onMinMaxInfo(MINMAXINFO* mmi)
 {
 	// 再小标签和按钮就挤不下了
-	mmi->ptMinTrackSize.x = (LONG)((mode == Settings ? 480.f : 430.f) * dpi);
+	mmi->ptMinTrackSize.x = (LONG)((mode == Settings ? 480.f : minPanelW) * dpi);
 	mmi->ptMinTrackSize.y = (LONG)((mode == Settings ? 420.f : 260.f) * dpi);
 }
 
@@ -585,7 +586,8 @@ LRESULT WinClip::onHitTest(const POINT pos)
 	// 顶上那一条：两个页签和右上角的按钮照常点，其余的空白当标题栏，可以拖着挪窗口
 	if (pt.y >= 0 && pt.y < (LONG)(42.f * dpi)) {
 		const float px = (float)pt.x;
-		const bool onModes = px >= 10.f * dpi && px < (10.f + modeTabW * modeCount) * dpi;
+		const auto link = adminLinkRect();
+		const bool onModes = (px >= 10.f * dpi && px < (10.f + modeTabW * modeCount) * dpi) || (px >= link.left && px < link.right);
 		const bool onBtns = px >= topBtnRect(3).left - 4.f * dpi;
 		if (!onModes && !onBtns) return HTCAPTION;
 	}
@@ -621,6 +623,15 @@ D2D1_RECT_F WinClip::btnRect(float rowY, float rowH, int which) const
 }
 
 // 窗口右上角的按钮，从右往左：0 关闭、1 固定、2 设置、3 添加内容（只有话术页有）
+D2D1_RECT_F WinClip::adminLinkRect()
+{
+	auto punch = ::Punch::get();
+	if (!punch || !punch->isManager()) return D2D1::RectF(0.f, 0.f, 0.f, 0.f);
+	const float left = (10.f + modeTabW * modeCount + 6.f) * dpi;
+	const float width = textWidth(Lang::get(L"punch.adminLink"), 13.f) + 30.f * dpi;
+	return D2D1::RectF(left, 8.f * dpi, left + width, 38.f * dpi);
+}
+
 D2D1_RECT_F WinClip::topBtnRect(int which) const
 {
 	const float size = 28.f * dpi;
@@ -893,6 +904,15 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 		const bool isHover = hover == Hit::Mode && hoverIndex == i;
 		drawText(ctx, Lang::get(modeKeys[i]), 14.f, rect,
 			cur ? 0xFFFFFF : isHover ? 0x222222 : 0x666666, true, true);
+	}
+	// 重要岗位的人：页签后面多一个"管理后台"，点了用浏览器打开后台。画成描边的小按钮，和页签区分开
+	if (auto link = adminLinkRect(); link.right > link.left) {
+		const bool hot = hover == Hit::Admin;
+		brush->SetColor(D2D1::ColorF(theme, hot ? 0.14f : 0.f));
+		ctx->FillRoundedRectangle(D2D1::RoundedRect(link, 6.f * dpi, 6.f * dpi), brush.Get());
+		brush->SetColor(D2D1::ColorF(theme, 0.55f));
+		ctx->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(link.left + dpi * 0.5f, link.top + 3.f * dpi, link.right - dpi * 0.5f, link.bottom - 3.f * dpi), 6.f * dpi, 6.f * dpi), brush.Get(), dpi);
+		drawText(ctx, Lang::get(L"punch.adminLink") + L" \u2197", 13.f, link, theme, true, true);
 	}
 	auto topBtn = [&](int which, Hit hit, const std::wstring& text, float size, UINT rgb, bool filled) {
 		auto rect = topBtnRect(which);
@@ -2240,6 +2260,7 @@ WinClip::Hit WinClip::hitTest(POINT pos, int& index)
 			index = i;
 			return Hit::Mode;
 		}
+		if (inRect(adminLinkRect())) return Hit::Admin;
 		return Hit::None;
 	}
 	if (mode == Settings) {
@@ -2375,6 +2396,10 @@ void WinClip::onDown(POINT pos, bool isRight)
 	if (isRight) return;
 	if (hit == Hit::Mode) {
 		setMode(index);
+	}
+	else if (hit == Hit::Admin) {
+		// 用默认浏览器打开管理后台，在那边登录
+		ShellExecute(nullptr, L"open", L"https://dk.zx3777.com/admin.html", nullptr, nullptr, SW_SHOWNORMAL);
 	}
 	else if (hit == Hit::Top0) {
 		if (isAway()) toast(Lang::get(L"punch.awayNoClose"), 2500, true);

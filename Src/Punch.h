@@ -48,6 +48,8 @@ public:
 
 	// 加没加入团队（本机有没有令牌）
 	bool isJoined() const { return !token.empty(); }
+	// 是不是重要岗位（后台给他设了岗位，或者是记账小组的负责人）：面板上多一个"管理后台"入口
+	bool isManager() const { return isJoined() && manager; }
 	// 加入了，并且已经从服务端拿到过一次状态
 	bool isLoaded() const { return loaded; }
 	// 正有一个请求在路上（这期间按钮不让再点）
@@ -105,6 +107,7 @@ private:
 	void notify();
 private:
 	std::wstring token, team, name, day, state;
+	bool manager{ false };
 	std::vector<Activity> activities;
 	std::vector<Segment> segments;
 	std::vector<Record> records;

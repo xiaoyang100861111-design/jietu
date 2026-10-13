@@ -218,6 +218,7 @@ bool Punch::apply(const std::wstring& json)
 	day = std::wstring{ obj.GetNamedString(L"day", L"") };
 	team = std::wstring{ obj.GetNamedString(L"team", L"") };
 	name = std::wstring{ obj.GetNamedString(L"name", L"") };
+	manager = obj.GetNamedBoolean(L"manager", false);
 	activities.clear();
 	segments.clear();
 	records.clear();
