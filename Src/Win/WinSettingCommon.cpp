@@ -669,7 +669,8 @@ void WinSettingCommon::showSelectBox(Ling::Button* btn)
     selectBox->setSize(btn->w/win->dpi, totalH);
     selectBox->setPositionType(Ling::Position::Absolute);
     selectBox->setPosition(Ling::Edge::Left, btn->x/win->dpi);
-    selectBox->setPosition(Ling::Edge::Top, btn->y/win->dpi);
+    // 摆在按钮下面，不盖住按钮：盖住的话点第一项等于同时点了按钮，按钮那边会把下拉框收掉，这一项就点不中了
+    selectBox->setPosition(Ling::Edge::Top, (btn->y + btn->h) / win->dpi + 2.f);
     selectBox->setBg(Theme::c(0xFFFFFFFF));
     selectBox->setBorder(1.f, Theme::c(0x597ef766));
     for (auto& pair:langs)
