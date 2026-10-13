@@ -228,6 +228,13 @@ bool Punch::apply(const std::wstring& json)
 			Activity rule;
 			rule.id = std::wstring{ item.GetNamedString(L"key", L"") };
 			rule.name = std::wstring{ item.GetNamedString(L"name", L"") };
+			// 四项自带的活动，后台没改过名字的（还是默认的中文名），按界面语言显示；管理员自己起的名字原样显示
+			static const std::pair<const wchar_t*, const wchar_t*> builtin[]{
+				{ L"吃饭", L"punch.actEat" }, { L"上厕所", L"punch.actWc" }, { L"抽烟", L"punch.actSmoke" }, { L"中途离岗", L"punch.actLeave" },
+			};
+			for (auto& [zhName, key] : builtin) {
+				if (rule.name == zhName) rule.name = Lang::get(key);
+			}
 			rule.limitMin = static_cast<int>(item.GetNamedNumber(L"limitMin", 0));
 			rule.maxCount = static_cast<int>(item.GetNamedNumber(L"maxCount", 0));
 			if (!rule.id.empty()) activities.push_back(std::move(rule));
