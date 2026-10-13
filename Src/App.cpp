@@ -12,6 +12,7 @@
 #include "./Win/WinPunchJoin.h"
 #include "ClipHistory.h"
 #include "Punch.h"
+#include "Report.h"
 #include "Sync.h"
 #include "Log.h"
 #include <shobjidl.h>
@@ -182,6 +183,7 @@ App::App()
         ensureDesktopShortcut();
         ClipHistory::init(); //常驻托盘时才记剪切板历史，用完即走的那种进程不记
         Punch::init();
+        Report::init();   //把日志里新出现的崩溃 / 错误传到服务器
         // 活动超时了：把面板叫出来提醒
         Punch::get()->onOvertime = [](const std::wstring& text) { WinClip::alertPunch(text); };
         // 面板是"固定"的（默认就是）：启动后直接显示出来。稍等一下再开，让上面这些先就位

@@ -172,6 +172,7 @@
     <ClCompile Include="MsgBox.cpp" />
     <ClCompile Include="ClipHistory.cpp" />
     <ClCompile Include="Punch.cpp" />
+    <ClCompile Include="Report.cpp" />
     <ClCompile Include="Sync.cpp" />
     <ClCompile Include="Win\WinSettingAccount.cpp" />
     <ClCompile Include="Win\WinClip.cpp" />
@@ -280,6 +281,7 @@
     <ClInclude Include="Theme.h" />
     <ClInclude Include="ClipHistory.h" />
     <ClInclude Include="Punch.h" />
+    <ClInclude Include="Report.h" />
     <ClInclude Include="Sync.h" />
     <ClInclude Include="Win\WinSettingAccount.h" />
     <ClInclude Include="Win\WinClip.h" />
