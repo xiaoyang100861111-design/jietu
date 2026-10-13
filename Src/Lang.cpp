@@ -89,6 +89,16 @@ void Lang::initLang(const std::wstring& langCode)
 		langObj = builtinObj;
 		return;
 	}
+	// 缅甸语也是内置的。以后新加了文案、它那份还没来得及翻的，用内置的英文兜底
+	if (langCode == L"my-MM" && builtinObj) {
+		langObj = builtinObj;
+		auto [enData, enSize] = Ling::Util::getRes(L"en-US");
+		if (enData && enSize > 0) {
+			JsonObject enObj{ nullptr };
+			if (JsonObject::TryParse(Ling::Util::readTextFromBytes(enData, enSize), enObj)) fallbackObj = enObj;
+		}
+		return;
+	}
 	// 第三方语言文件：用户自己放进来的，可能是老版本的（缺新加的键）、也可能手工改坏了。
 	// 所以一是用 TryParse（Parse 解析失败直接抛，一路抛出去就是进程没了），
 	// 二是把内置的 en-US 留在 fallbackObj 里给 Lang::get 兜底
@@ -116,7 +126,7 @@ void Lang::initLang(const std::wstring& langCode)
 
 std::vector<std::pair<std::wstring, std::wstring>> Lang::getSupportedLang()
 {
-	std::vector<std::pair<std::wstring, std::wstring>> result = { {L"简体中文",L"zh-CN"},{L"English",L"en-US"} };
+	std::vector<std::pair<std::wstring, std::wstring>> result = { {L"简体中文",L"zh-CN"},{L"English",L"en-US"},{L"မြန်မာ",L"my-MM"} };
 	for (const auto& entry : getLangFiles()) {
 		std::wstring filename = entry.filename().wstring();
 		auto arr = Ling::Util::splitStr(filename, L'.');

@@ -1806,8 +1806,8 @@ void WinClip::paintLedger(ID2D1DeviceContext* ctx)
 
 	// 常用操作：一排小按钮，放不下就折到下一行。"账单""我的"是查看，其余等于替你发一条指令
 	const std::pair<const wchar_t*, const wchar_t*> quick[]{
-		{ L"bill", L"ledger.btnBill" }, { L"mine", L"ledger.btnMine" }, { L"撤销入款", nullptr }, { L"撤销下发", nullptr },
-		{ L"log", L"ledger.btnLog" }, { L"配置", nullptr }, { L"显示操作员", nullptr }, { L"帮助", nullptr },
+		{ L"bill", L"ledger.btnBill" }, { L"mine", L"ledger.btnMine" }, { L"撤销入款", L"ledger.btnUndoIn" }, { L"撤销下发", L"ledger.btnUndoOut" },
+		{ L"log", L"ledger.btnLog" }, { L"配置", L"ledger.btnConfig" }, { L"显示操作员", L"ledger.btnOperators" }, { L"帮助", L"ledger.btnHelp" },
 	};
 	// 只能看账的成员：记账、撤销都轮不到他，这几个按钮就不摆出来（"我的账单"是看自己记的，他也没有）
 	bool canWrite{ false };
