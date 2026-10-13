@@ -84,8 +84,25 @@ namespace {
 		return MonitorFromPoint(outside, MONITOR_DEFAULTTONULL) == nullptr;
 	}
 
+	// 正在吃饭 / 上厕所 / 抽烟 / 中途离岗（还没回座）
+	bool isAway()
+	{
+		auto punch = ::Punch::get();
+		return punch && punch->isJoined() && punch->getState() == ::Punch::State::Away;
+	}
+
 	void CALLBACK onDockTimer(HWND, UINT, UINT_PTR, DWORD)
 	{
+		// 活动中面板得一直摆在那儿（回来一眼看到，记得点回座）：被关掉了、或者程序刚启动，约一秒内把它叫出来。
+		// 不抢焦点，正在截图时不打扰
+		static int awayTicks{ 0 };
+		if (!winClip && ++awayTicks >= 20) {
+			awayTicks = 0;
+			if (isAway() && !WinCap::get() && ClipHistory::get()) {
+				WinClip::showForAway();
+				return;
+			}
+		}
 		const int edge = Setting::get() ? Setting::get()->getDockEdge() : 0;
 		POINT pt{};
 		if (!GetCursorPos(&pt)) return;
@@ -364,6 +381,12 @@ void WinClip::openSettings()
 	winClip->enterSettings();
 }
 
+void WinClip::showForAway()
+{
+	if (winClip || !ClipHistory::get()) return;
+	winClip.reset(new WinClip(GetForegroundWindow(), Work, Setting::get()->getDockEdge(), false));
+}
+
 void WinClip::showAtStartup()
 {
 	if (winClip || !ClipHistory::get()) return;
@@ -409,6 +432,11 @@ POINT WinClip::hiddenPos(POINT base) const
 void WinClip::requestClose()
 {
 	if (closing) return;
+	// 活动中不收：人出去了，回来要一眼看到"回座"。回座之后就能照常收起来
+	if (isAway()) {
+		if (mode != Work && mode != Settings) setMode(Work);
+		return;
+	}
 	closing = true;
 	killTimer(timerMoveEnd);
 	// 贴边的先滑回屏幕外面再关（动画走完由 onTick 来关）
@@ -2120,6 +2148,7 @@ void WinClip::onDown(POINT pos, bool isRight)
 		setMode(index);
 	}
 	else if (hit == Hit::Top0) {
+		if (isAway()) toast(Lang::get(L"punch.awayNoClose"), 2500, true);
 		requestClose();
 	}
 	else if (hit == Hit::Top1) {

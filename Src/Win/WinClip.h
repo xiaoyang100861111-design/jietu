@@ -20,6 +20,8 @@ public:
 	enum Mode { Work = 0, Ledger = 1, Phrase = 2, Clip = 3, Settings = 4 };
 	// 把面板叫出来并显示设置（面板没开就开一个）。齿轮、托盘菜单的"设置"、设置页自己要重开时都走这里
 	static void openSettings();
+	// 活动中（吃饭 / 上厕所…还没回座）面板被关掉了：再把它摆出来，停在打卡页，不抢焦点
+	static void showForAway();
 	~WinClip();
 	// 快捷键 / 托盘菜单：没开就按 mode 打开；开着且就是这个页签就关掉，是另一个页签就切过去
 	static void toggle(int mode);
