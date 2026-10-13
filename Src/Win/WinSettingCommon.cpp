@@ -8,6 +8,7 @@
 #include "../Theme.h"
 #include "WinSetting.h"
 #include "WinSettingCommon.h"
+#include "WinClip.h"
 
 namespace {
     // 下拉框按钮上，字后面跟一个小三角
@@ -20,6 +21,7 @@ WinSettingCommon::WinSettingCommon(Ling::WinBase* parent):Ling::Node(parent)
     initLangCtrls();
     initThemeCtrls();
     initDarkCtrls();
+    initOpacityCtrls();
     initClipCtrls();
     initDockCtrls();
     initWidthCtrls(L"rect");
@@ -57,6 +59,9 @@ WinSettingCommon::~WinSettingCommon()
     win->onChar.remove(hexCharToken);
     win->onKeyDown.remove(hexKeyToken);
     win->onMouseDown.remove(hexMouseToken);
+    win->onMouseDown.remove(opacityDownToken);
+    win->onMouseMove.remove(opacityMoveToken);
+    win->onMouseUp.remove(opacityUpToken);
 }
 
 void WinSettingCommon::initAutoStartCtrls()
@@ -343,6 +348,93 @@ void WinSettingCommon::initDarkCtrls()
     auto border = makeChild<Ling::Node>();
     border->setHeight(1.f);
     border->setBg(Theme::c(0xE0E0E0FF));
+}
+
+// 面板透明度：一根可以拖的滑块，30%–100%，拖的时候面板实时跟着变
+void WinSettingCommon::initOpacityCtrls()
+{
+    constexpr float barW{ 180.f };
+    auto box = makeChild<Ling::Node>();
+    box->setHeight(39.f);
+    box->setFlexDirection(Ling::FlexDirection::Row);
+    box->setAlignItems(Ling::Align::Center);
+
+    auto label = box->makeChild<Ling::Label>();
+    label->setColor(Theme::t(0x333333FF));
+    label->setText(Lang::get(L"setting.opacity"));
+    label->setHeightPercent(100.f);
+    label->setJustifyContent(Ling::Justify::Center);
+    label->setFlexGrow(1.f);
+
+    opacityValue = Setting::get()->getPanelOpacity();
+    opacityLabel = box->makeChild<Ling::Label>();
+    opacityLabel->setColor(Theme::t(0x666666FF));
+    opacityLabel->setText(std::format(L"{}%", opacityValue));
+    opacityLabel->setHeightPercent(100.f);
+    opacityLabel->setJustifyContent(Ling::Justify::Center);
+    opacityLabel->setWidth(48.f);
+
+    // 滑块：外面一圈高一些好点中，里面一条细轨道，左边按数值填上主题色
+    opacityBar = box->makeChild<Ling::Node>();
+    opacityBar->setWidth(barW);
+    opacityBar->setHeight(28.f);
+    opacityBar->setFlexDirection(Ling::FlexDirection::Row);
+    opacityBar->setAlignItems(Ling::Align::Center);
+    const uint32_t theme = (Setting::get()->getThemeColor() << 8) | 0xFF;
+    opacityFill = opacityBar->makeChild<Ling::Node>();
+    opacityFill->setHeight(6.f);
+    opacityFill->setBorderRadius(3.f);
+    opacityFill->setBg(theme);
+    opacityFill->setWidth((opacityValue - 30) / 70.f * (barW - 14.f));
+    auto thumb = opacityBar->makeChild<Ling::Node>();
+    thumb->setWidth(14.f);
+    thumb->setHeight(14.f);
+    thumb->setBorderRadius(7.f);
+    thumb->setBg(theme);
+    auto rest = opacityBar->makeChild<Ling::Node>();
+    rest->setHeight(6.f);
+    rest->setBorderRadius(3.f);
+    rest->setFlexGrow(1.f);
+    rest->setBg(Theme::c(0xDDDDE0FF));
+
+    auto weakThis = getWeakThis();
+    opacityDownToken = win->onMouseDown.add([this, weakThis](POINT pos, bool isRight) {
+        if (!weakThis.lock() || isRight || !opacityBar || !opacityBar->isPosIn(pos)) return;
+        opacityDragging = true;
+        setOpacityAt(pos.x, false);
+    });
+    opacityMoveToken = win->onMouseMove.add([this, weakThis](POINT pos) {
+        if (!weakThis.lock() || !opacityDragging) return;
+        // 鼠标是在窗口外面松开的话收不到抬起，靠按键状态兜一下
+        if (!(GetAsyncKeyState(VK_LBUTTON) & 0x8000)) {
+            opacityDragging = false;
+            Setting::get()->setPanelOpacity(opacityValue);
+            return;
+        }
+        setOpacityAt(pos.x, false);
+    });
+    opacityUpToken = win->onMouseUp.add([this, weakThis](POINT pos, bool isRight) {
+        if (!weakThis.lock() || !opacityDragging) return;
+        opacityDragging = false;
+        setOpacityAt(pos.x, true);
+    });
+
+    auto border = makeChild<Ling::Node>();
+    border->setHeight(1.f);
+    border->setBg(Theme::c(0xE0E0E0FF));
+}
+
+void WinSettingCommon::setOpacityAt(LONG posX, bool save)
+{
+    if (!opacityBar || opacityBar->w <= 0.f) return;
+    // 滑块两头各留半个圆点的宽度
+    const float half = 7.f * win->dpi;
+    const float ratio = std::clamp((posX - opacityBar->x - half) / (opacityBar->w - half * 2.f), 0.f, 1.f);
+    opacityValue = 30 + (int)std::lround(ratio * 70.f);
+    opacityFill->setWidth(ratio * (opacityBar->w / win->dpi - 14.f));
+    opacityLabel->setText(std::format(L"{}%", opacityValue));
+    WinClip::applyOpacity(opacityValue);
+    if (save) Setting::get()->setPanelOpacity(opacityValue);
 }
 
 void WinSettingCommon::initClipCtrls()

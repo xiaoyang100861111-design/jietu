@@ -30,6 +30,9 @@ public:
 	void setClipSize(float w, float h);
 	// 面板的"固定"开关：固定后贴边的面板不会自己缩回去，用完一条话术也不关
 	// 黑夜模式（深色界面）
+	// 面板的不透明度，百分比，30–100（100 = 完全不透明）
+	int getPanelOpacity();
+	void setPanelOpacity(int percent);
 	bool getDarkMode();
 	void setDarkMode(bool val);
 	bool getClipPinned();

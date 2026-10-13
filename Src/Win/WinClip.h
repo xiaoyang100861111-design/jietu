@@ -20,6 +20,8 @@ public:
 	enum Mode { Work = 0, Ledger = 1, Phrase = 2, Clip = 3, Settings = 4 };
 	// 把面板叫出来并显示设置（面板没开就开一个）。齿轮、托盘菜单的"设置"、设置页自己要重开时都走这里
 	static void openSettings();
+	// 按设置里的不透明度调整面板（拖滑块时实时调它预览）。percent 小于 0 表示用存着的那个值
+	static void applyOpacity(int percent = -1);
 	// 活动中（吃饭 / 上厕所…还没回座）面板被关掉了：再把它摆出来，停在打卡页，不抢焦点
 	static void showForAway();
 	~WinClip();

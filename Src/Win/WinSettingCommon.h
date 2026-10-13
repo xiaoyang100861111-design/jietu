@@ -18,6 +18,9 @@ private:
 	void initLangCtrls();
 	void initThemeCtrls();
 	void initDarkCtrls();
+	void initOpacityCtrls();
+	// 鼠标在滑块上的横坐标 → 不透明度，更新滑块和面板；save 为 true 时存进配置
+	void setOpacityAt(LONG posX, bool save);
 	void initClipCtrls();
 	void initUpdateCtrls();
 	void initEngineCtrls();
@@ -46,5 +49,12 @@ private:
 	// 正在敲哪个颜色的色值（空 = 没在敲）和已经敲了的几位
 	std::wstring hexTarget, hexText;
 	winrt::event_token hexCharToken, hexKeyToken, hexMouseToken;
+	// 透明度滑块：整条、左边已填的一段、显示数值的字；是不是正拖着
+	Ling::Node* opacityBar{ nullptr };
+	Ling::Node* opacityFill{ nullptr };
+	Ling::Label* opacityLabel{ nullptr };
+	bool opacityDragging{ false };
+	int opacityValue{ 100 };
+	winrt::event_token opacityDownToken, opacityMoveToken, opacityUpToken;
 };
 

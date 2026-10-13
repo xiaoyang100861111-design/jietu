@@ -225,6 +225,21 @@ void Setting::setClipSize(float w, float h)
     save();
 }
 
+int Setting::getPanelOpacity()
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    const int val = common ? static_cast<int>(common.GetNamedNumber(L"panelOpacity", 100)) : 100;
+    return val < 30 ? 30 : val > 100 ? 100 : val;
+}
+
+void Setting::setPanelOpacity(int percent)
+{
+    auto common = configObj.GetNamedObject(L"common", nullptr);
+    if (!common) return;
+    common.SetNamedValue(L"panelOpacity", JsonValue::CreateNumberValue(percent < 30 ? 30 : percent > 100 ? 100 : percent));
+    save();
+}
+
 bool Setting::getDarkMode()
 {
     auto common = configObj.GetNamedObject(L"common", nullptr);

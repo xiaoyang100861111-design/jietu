@@ -381,6 +381,14 @@ void WinClip::openSettings()
 	winClip->enterSettings();
 }
 
+void WinClip::applyOpacity(int percent)
+{
+	if (!winClip || !winClip->body) return;
+	if (percent < 0) percent = Setting::get()->getPanelOpacity();
+	// 整个窗口的内容（画布、输入框、设置页）都挂在 body 这棵树下面，调它的不透明度就是调整个面板
+	winClip->body->visual.Opacity(std::clamp(percent, 30, 100) / 100.f);
+}
+
 void WinClip::showForAway()
 {
 	if (winClip || !ClipHistory::get()) return;
@@ -498,6 +506,7 @@ void WinClip::onCreated()
 	}
 	if (mode == Ledger) loadLedgerGroups();
 	created = true;
+	applyOpacity();
 	// 这个定时器一直开着：记"面板之外谁在前台"（粘贴要粘回它那儿），贴边时顺便看光标移开没有
 	setTimer(200, timerDock);
 	if (dockEdge != 0) {
