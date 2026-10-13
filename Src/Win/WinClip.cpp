@@ -1414,7 +1414,7 @@ void WinClip::leaveSettings(int toMode)
 
 // ———————————————— 记账页 ————————————————
 
-void WinClip::loadLedgerGroups()
+void WinClip::loadLedgerGroups(bool reloadBill)
 {
 	auto punch = ::Punch::get();
 	if (!punch || !punch->isJoined()) {
@@ -1424,7 +1424,7 @@ void WinClip::loadLedgerGroups()
 		refresh();
 		return;
 	}
-	::Punch::api(false, L"/api/ledger/groups", L"", [](int status, std::wstring text) {
+	::Punch::api(false, L"/api/ledger/groups", L"", [reloadBill](int status, std::wstring text) {
 		if (!winClip || winClip->closing) return;
 		auto self = winClip.get();
 		self->ledgerLoaded = true;
@@ -1451,7 +1451,8 @@ void WinClip::loadLedgerGroups()
 		if (!has) self->lgroupId = self->lgroups.empty() ? 0 : self->lgroups.front().id;
 		self->rebuild();
 		self->refresh();
-		if (self->lgroupId != 0 && self->mode == Ledger) self->loadLedgerBill(false);
+		// 刚执行完一条指令时不重新取账单：那会把指令回的内容（操作员名单、日志这些）马上盖掉
+		if (reloadBill && self->lgroupId != 0 && self->mode == Ledger) self->loadLedgerBill(false);
 	});
 }
 
@@ -1739,8 +1740,8 @@ void WinClip::sendLedger(const std::wstring& raw)
 		self->setBoxText(L"");
 		if (!head.empty()) self->toast(head, 2500, false);
 		else if (self->ledgerHasBill) self->toast(Lang::get(L"ledger.done"), 1000, false);
-		// 开关记账、全员记账这类指令会改变小组信息，顺手刷新一下
-		self->loadLedgerGroups();
+		// 开关记账、全员记账这类指令会改变小组信息，顺手刷新一下（只刷新小组和权限，不动下面显示的内容）
+		self->loadLedgerGroups(false);
 	});
 	refresh();
 }
@@ -1816,7 +1817,7 @@ void WinClip::paintLedger(ID2D1DeviceContext* ctx)
 	// 常用操作：一排小按钮，放不下就折到下一行。"账单""我的"是查看，其余等于替你发一条指令
 	const std::pair<const wchar_t*, const wchar_t*> quick[]{
 		{ L"bill", L"ledger.btnBill" }, { L"mine", L"ledger.btnMine" }, { L"撤销入款", L"ledger.btnUndoIn" }, { L"撤销下发", L"ledger.btnUndoOut" },
-		{ L"log", L"ledger.btnLog" }, { L"配置", L"ledger.btnConfig" }, { L"显示操作员", L"ledger.btnOperators" }, { L"帮助", L"ledger.btnHelp" },
+		{ L"log", L"ledger.btnLog" }, { L"显示操作员", L"ledger.btnOperators" },
 	};
 	// 只能看账的成员：记账、撤销都轮不到他，这几个按钮就不摆出来（"我的账单"是看自己记的，他也没有）
 	bool canWrite{ false };

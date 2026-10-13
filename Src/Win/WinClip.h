@@ -91,7 +91,8 @@ private:
 	void paintLedger(ctx_t ctx);
 	void onLedgerClick(const std::wstring& id);
 	// 取我所在的记账小组；取当日账单；发一条指令（和原来在群里发消息一样）
-	void loadLedgerGroups();
+	// reloadBill：取完小组后要不要接着取当日账单（刚执行完指令时不要，免得把指令的回复盖掉）
+	void loadLedgerGroups(bool reloadBill = true);
 	void loadLedgerBill(bool mine);
 	void loadLedgerLog();
 	// 把服务端回的账单（JSON）拆进 lbill；拆不出来返回 false，这时按纯文字显示
