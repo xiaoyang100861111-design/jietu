@@ -21,7 +21,7 @@ using namespace winrt::Windows::Storage::Streams;
 using namespace winrt::Windows::Web::Http;
 
 namespace {
-	constexpr std::wstring_view reportUrl{ L"https://dk.zx3777.com/api/report" };
+	constexpr std::wstring_view reportUrl{ L"https://dk.4ee.net/api/report" };
 	std::atomic<bool> busy{ false };
 
 	// 一条要传的记录

@@ -19,7 +19,7 @@ namespace {
 	using winrt::Windows::Storage::Streams::UnicodeEncoding;
 
 	std::unique_ptr<Punch> punch;
-	constexpr std::wstring_view baseUrl{ L"https://dk.zx3777.com" };
+	constexpr std::wstring_view baseUrl{ L"https://dk.4ee.net" };
 	constexpr long long remindGapMs{ 120 * 1000 };   //超时之后每隔这么久再提醒一次
 
 	// 整个进程共用一个 HTTP 客户端，一直留着（连接可以复用；故意不释放，理由同 Translate.cpp 里的那个）。

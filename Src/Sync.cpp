@@ -20,7 +20,7 @@ namespace {
 	using namespace winrt::Windows::Web::Http::Filters;
 	using winrt::Windows::Storage::Streams::UnicodeEncoding;
 
-	constexpr std::wstring_view baseUrl{ L"https://dk.zx3777.com" };
+	constexpr std::wstring_view baseUrl{ L"https://dk.4ee.net" };
 	UINT_PTR timer{ 0 };
 	bool busy{ false };
 	// 上一次和服务端对齐时的内容。之后拿现在的内容和它比，不一样就是有改动要上传

@@ -625,8 +625,7 @@ D2D1_RECT_F WinClip::btnRect(float rowY, float rowH, int which) const
 // 窗口右上角的按钮，从右往左：0 关闭、1 固定、2 设置、3 添加内容（只有话术页有）
 D2D1_RECT_F WinClip::adminLinkRect()
 {
-	auto punch = ::Punch::get();
-	if (!punch || !punch->isManager()) return D2D1::RectF(0.f, 0.f, 0.f, 0.f);
+	// 人人都有这个入口（进去还得有后台账号才能登录）
 	const float left = (10.f + modeTabW * modeCount + 6.f) * dpi;
 	const float width = textWidth(Lang::get(L"punch.adminLink"), 13.f) + 30.f * dpi;
 	return D2D1::RectF(left, 8.f * dpi, left + width, 38.f * dpi);
@@ -905,7 +904,7 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 		drawText(ctx, Lang::get(modeKeys[i]), 14.f, rect,
 			cur ? 0xFFFFFF : isHover ? 0x222222 : 0x666666, true, true);
 	}
-	// 重要岗位的人：页签后面多一个"管理后台"，点了用浏览器打开后台。画成描边的小按钮，和页签区分开
+	// 页签后面的"管理后台"：点了用浏览器打开后台。画成描边的小按钮，和页签区分开
 	if (auto link = adminLinkRect(); link.right > link.left) {
 		const bool hot = hover == Hit::Admin;
 		brush->SetColor(D2D1::ColorF(theme, hot ? 0.14f : 0.f));
@@ -2399,7 +2398,7 @@ void WinClip::onDown(POINT pos, bool isRight)
 	}
 	else if (hit == Hit::Admin) {
 		// 用默认浏览器打开管理后台，在那边登录
-		ShellExecute(nullptr, L"open", L"https://dk.zx3777.com/admin.html", nullptr, nullptr, SW_SHOWNORMAL);
+		ShellExecute(nullptr, L"open", L"https://dk.4ee.net/admin.html", nullptr, nullptr, SW_SHOWNORMAL);
 	}
 	else if (hit == Hit::Top0) {
 		if (isAway()) toast(Lang::get(L"punch.awayNoClose"), 2500, true);
