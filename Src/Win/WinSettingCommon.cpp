@@ -9,6 +9,11 @@
 #include "WinSetting.h"
 #include "WinSettingCommon.h"
 
+namespace {
+    // 下拉框按钮上，字后面跟一个小三角
+    const std::wstring dropMark{ L"  \u25BE" };
+}
+
 WinSettingCommon::WinSettingCommon(Ling::WinBase* parent):Ling::Node(parent)
 {    
     initAutoStartCtrls();
@@ -117,13 +122,17 @@ void WinSettingCommon::initLangCtrls()
     selectBtn = box->makeChild<Ling::Button>();
     selectBtn->setColor(Theme::t(0x333333FF));
     selectBtn->setHoverColor(Theme::t(0x333333FF));
-    selectBtn->setText(langName);
+    selectBtn->setText(langName + dropMark);
     selectBtn->setHeight(28.f);
     selectBtn->setWidth(160.f);
     selectBtn->setBorder(1.f, Theme::c(0xE0E0E0FF));
     selectBtn->setHoverBg(Theme::c(0XFFFFFFFF));
     selectBtn->onClick.add([this](Ling::Button* btn) {
-        if (selectBox) return;
+        if (selectBox) {
+            const bool same = anchorBtn == btn;
+            hideSelectBox();
+            if (same) return;   //已经开着：这一下是收起来
+        }
         this->showSelectBox(btn);
         });
     auto border = makeChild<Ling::Node>();
@@ -149,15 +158,16 @@ void WinSettingCommon::initDockCtrls()
     auto btn = box->makeChild<Ling::Button>();
     btn->setColor(Theme::t(0x333333FF));
     btn->setHoverColor(Theme::t(0x333333FF));
-    btn->setText(Lang::get(std::format(L"setting.dock{}", Setting::get()->getDockEdge())));
+    btn->setText(Lang::get(std::format(L"setting.dock{}", Setting::get()->getDockEdge())) + dropMark);
     btn->setHeight(28.f);
     btn->setWidth(160.f);
     btn->setBorder(1.f, Theme::c(0xE0E0E0FF));
     btn->setHoverBg(Theme::c(0XFFFFFFFF));
-    btn->onClick.add([](Ling::Button* btn) {
-        auto val = (Setting::get()->getDockEdge() + 1) % 5;
-        Setting::get()->setDockEdge(val);
-        btn->setText(Lang::get(std::format(L"setting.dock{}", val)));
+    // 下拉选：不贴边 / 左 / 上 / 右 / 下
+    btn->onClick.add([this](Ling::Button* btn) {
+        std::vector<std::pair<std::wstring, std::wstring>> options;
+        for (int i = 0; i < 5; i++) options.push_back({ Lang::get(std::format(L"setting.dock{}", i)), std::to_wstring(i) });
+        showOptions(btn, options, [](const std::wstring& value) { Setting::get()->setDockEdge(std::stoi(value)); });
     });
 
     auto border = makeChild<Ling::Node>();
@@ -233,7 +243,7 @@ void WinSettingCommon::initEngineCtrls()
         auto btn = box->makeChild<Ling::Button>();
         btn->setColor(Theme::t(0x333333FF));
         btn->setHoverColor(Theme::t(0x333333FF));
-        btn->setText(text);
+        btn->setText(text + dropMark);
         btn->setHeight(28.f);
         btn->setWidth(220.f);
         btn->setBorder(1.f, Theme::c(0xE0E0E0FF));
@@ -245,17 +255,16 @@ void WinSettingCommon::initEngineCtrls()
         return btn;
     };
     auto setting = Setting::get();
-    makeRow(L"setting.ocrEngine", Lang::get(L"setting.ocr_" + setting->getOcrEngine()))->onClick.add([](Ling::Button* btn) {
-        auto next = Setting::get()->getOcrEngine() == L"google" ? L"windows" : L"google";
-        Setting::get()->setOcrEngine(next);
-        btn->setText(Lang::get(std::wstring{ L"setting.ocr_" } + next));
+    // 两个都是下拉选
+    makeRow(L"setting.ocrEngine", Lang::get(L"setting.ocr_" + setting->getOcrEngine()))->onClick.add([this](Ling::Button* btn) {
+        std::vector<std::pair<std::wstring, std::wstring>> options;
+        for (auto name : { L"google", L"windows" }) options.push_back({ Lang::get(std::wstring{ L"setting.ocr_" } + name), name });
+        showOptions(btn, options, [](const std::wstring& value) { Setting::get()->setOcrEngine(value); });
     });
-    makeRow(L"setting.transEngine", Lang::get(L"setting.trans_" + setting->getTranslateEngine()))->onClick.add([](Ling::Button* btn) {
-        // google → microsoft → yandex → alibaba → google
-        auto cur = Setting::get()->getTranslateEngine();
-        auto next = cur == L"google" ? L"microsoft" : cur == L"microsoft" ? L"yandex" : cur == L"yandex" ? L"alibaba" : L"google";
-        Setting::get()->setTranslateEngine(next);
-        btn->setText(Lang::get(std::wstring{ L"setting.trans_" } + next));
+    makeRow(L"setting.transEngine", Lang::get(L"setting.trans_" + setting->getTranslateEngine()))->onClick.add([this](Ling::Button* btn) {
+        std::vector<std::pair<std::wstring, std::wstring>> options;
+        for (auto name : { L"google", L"microsoft", L"yandex", L"alibaba" }) options.push_back({ Lang::get(std::wstring{ L"setting.trans_" } + name), name });
+        showOptions(btn, options, [](const std::wstring& value) { Setting::get()->setTranslateEngine(value); });
     });
 }
 
@@ -590,13 +599,60 @@ void WinSettingCommon::hideSelectBox()
     selectBox = nullptr;
 }
 
+// 通用的下拉框：在按钮底下摆一列选项（显示的字，存的值），点一个就调 onPick 并把按钮上的字换掉。
+// 再点一下按钮、或者点到别处，收起来
+void WinSettingCommon::showOptions(Ling::Button* btn, const std::vector<std::pair<std::wstring, std::wstring>>& options,
+    std::function<void(const std::wstring& value)> onPick)
+{
+    if (selectBox) {
+        const bool same = anchorBtn == btn;
+        hideSelectBox();
+        if (same) return;   //已经开着：这一下是收起来
+    }
+    anchorBtn = btn;
+    auto weakThis = getWeakThis();
+    onMouseDownToken = win->onMouseDown.add([this, weakThis](POINT pos, bool isRight) {
+        if (!weakThis.lock() || !selectBox) return;
+        // 点在按钮上的归按钮自己的 onClick 管（收起来），点在选项上的归选项管，其余的都是点到别处了
+        if (anchorBtn && anchorBtn->isPosIn(pos)) return;
+        if (selectBox->isPosIn(pos)) return;
+        hideSelectBox();
+    });
+    const float itemH{ 30.f };
+    selectBox = win->body->makeChild<Ling::ScrollerBox>();
+    selectBox->setSize(btn->w / win->dpi, (std::min)(320.f, itemH * options.size()));
+    selectBox->setPositionType(Ling::Position::Absolute);
+    selectBox->setPosition(Ling::Edge::Left, btn->x / win->dpi);
+    selectBox->setPosition(Ling::Edge::Top, (btn->y + btn->h) / win->dpi + 2.f);
+    selectBox->setBg(Theme::c(0xFFFFFFFF));
+    selectBox->setBorder(1.f, Theme::c(0x597ef766));
+    for (auto& [label, value] : options) {
+        auto item = selectBox->makeChild<Ling::Button>();
+        item->setColor(Theme::t(0x333333FF));
+        item->setText(label);
+        item->setHeight(itemH);
+        item->setWidthPercent(100.f);
+        item->setHoverBg(Theme::c(0Xf2f2f2FF));
+        item->setHoverColor(Theme::t(0X000000FF));
+        item->onClick.add([this, weakThis, btn, label, value, onPick](Ling::Button*) {
+            onPick(value);
+            btn->setText(label + dropMark);
+            // 选项按钮自己还在回调里，等这一轮消息走完再把整个下拉框拆掉
+            Ling::App::get()->dq.TryEnqueue([this, weakThis]() {
+                if (weakThis.lock()) hideSelectBox();
+            });
+        });
+    }
+}
+
 void WinSettingCommon::showSelectBox(Ling::Button* btn)
 {
+    anchorBtn = btn;
     auto weakThis = getWeakThis();
     onMouseDownToken = win->onMouseDown.add([this,weakThis](POINT pos, bool isRight) {
         if (!weakThis.lock()) return;
         if (!this->selectBox) return;
-        if (this->selectBtn->isPosIn(pos)) return;
+        if (this->anchorBtn && this->anchorBtn->isPosIn(pos)) return;
         if (this->selectBox->isPosIn(pos)) return;
         win->body->removeChild(selectBox);
         this->selectBox = nullptr;

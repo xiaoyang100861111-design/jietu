@@ -1,6 +1,10 @@
 ﻿#pragma once
 #include <include/Ling.h>
 #include <unordered_map>
+#include <functional>
+#include <string>
+#include <utility>
+#include <vector>
 class WinSettingCommon:public Ling::Node
 {
 public:
@@ -30,8 +34,12 @@ private:
 	void onHexKey(UINT key);
 	void setAutoStartBtn(Ling::Button* btn);
 	void showSelectBox(Ling::Button* btn);
+	void showOptions(Ling::Button* btn, const std::vector<std::pair<std::wstring, std::wstring>>& options,
+		std::function<void(const std::wstring& value)> onPick);
 private:
 	Ling::Button* selectBtn{ nullptr };
+	// 现在开着的下拉框是挂在哪个按钮底下的
+	Ling::Button* anchorBtn{ nullptr };
 	Ling::ScrollerBox* selectBox{ nullptr };
 	winrt::event_token onMouseDownToken;
 	std::unordered_map<std::wstring, Ling::Button*> swatches, hexBtns;
