@@ -105,10 +105,12 @@ namespace {
 			}
 		}
 		const int edge = Setting::get() ? Setting::get()->getDockEdge() : 0;
+		// 不贴边（悬浮 / 点了"取消靠边"）：鼠标顶到哪条屏幕边都不叫出面板
+		if (edge == 0) return;
 		POINT pt{};
 		if (!GetCursorPos(&pt)) return;
-		// 贴哪条边就顶哪条边；悬浮的（没贴边）顶屏幕右边，面板还是出现在它原来悬浮的位置
-		if (!atEdge(edge == 0 ? 3 : edge, pt)) {
+		// 贴哪条边就顶哪条边
+		if (!atEdge(edge, pt)) {
 			dockArmed = true;
 			dockHits = 0;
 			return;
@@ -406,8 +408,8 @@ void WinClip::showAtStartup()
 
 void WinClip::applyDock()
 {
-	// 这个定时器一直开着：面板点 ✕ 只是收起来，鼠标顶到屏幕边上随时能再叫出来。
-	// 面板是悬浮的（没贴边）也一样，那时认屏幕右边（见 onDockTimer）
+	// 这个定时器一直开着：面板点 ✕ 只是收起来，鼠标顶到贴的那条屏幕边上随时能再叫出来。
+	// 不贴边时它只管"活动中把面板摆出来"，不看屏幕边（见 onDockTimer）
 	if (!dockTimer) dockTimer = SetTimer(nullptr, 0, 50, onDockTimer);
 }
 
