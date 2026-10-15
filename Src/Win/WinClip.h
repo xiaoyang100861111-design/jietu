@@ -60,7 +60,7 @@ private:
 		bool selected{ false };
 	};
 	// 光标落在什么东西上。Btn0~2 是一行右边的小按钮，Top0~2 是窗口右上角的按钮，都从右往左数
-	enum class Hit { None, Mode, Tab, Clear, Row, Btn0, Btn1, Btn2, Top0, Top1, Top2, Top3, PunchBtn, Admin };
+	enum class Hit { None, Mode, Tab, Clear, Row, Btn0, Btn1, Btn2, Top0, Top1, Top2, Top3, PunchBtn, Admin, Undock };
 	// 搜索框现在在收什么：平时是搜索词，新建 / 重命名分组时临时借用它
 	enum class Input { Search, Group, Rename };
 	WinClip(HWND prevHwnd, int mode, int edge, bool byHotkey);
@@ -150,6 +150,10 @@ private:
 	D2D1_RECT_F topBtnRect(int which) const;
 	// 页签后面那个"管理后台"入口的位置
 	D2D1_RECT_F adminLinkRect();
+	// 贴边时右上角按钮左边的"取消靠边"。没贴边返回空矩形；地方不够时缩成一个图标
+	D2D1_RECT_F undockRect(bool* compact = nullptr);
+	// 点了"取消靠边"：变成普通悬浮窗口，往屏幕里挪一点，鼠标顶边也不再滑出
+	void undock();
 	// 屏幕边缘外面、刚好看不见的那个位置（base 是贴边停好的位置）
 	POINT hiddenPos(POINT base) const;
 private:

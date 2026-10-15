@@ -588,7 +588,8 @@ LRESULT WinClip::onHitTest(const POINT pos)
 		const float px = (float)pt.x;
 		const auto link = adminLinkRect();
 		const bool onModes = (px >= 10.f * dpi && px < (10.f + modeTabW * modeCount) * dpi) || (px >= link.left && px < link.right);
-		const bool onBtns = px >= topBtnRect(3).left - 4.f * dpi;
+		const auto undockBtn = undockRect();
+		const bool onBtns = px >= topBtnRect(3).left - 4.f * dpi || (px >= undockBtn.left && px < undockBtn.right);
 		if (!onModes && !onBtns) return HTCAPTION;
 	}
 	return HTCLIENT;
@@ -629,6 +630,43 @@ D2D1_RECT_F WinClip::adminLinkRect()
 	const float left = (10.f + modeTabW * modeCount + 6.f) * dpi;
 	const float width = textWidth(Lang::get(L"punch.adminLink"), 13.f) + 30.f * dpi;
 	return D2D1::RectF(left, 8.f * dpi, left + width, 38.f * dpi);
+}
+
+D2D1_RECT_F WinClip::undockRect(bool* compact)
+{
+	if (compact) *compact = false;
+	if (dockEdge == 0) return D2D1::RectF(0.f, 0.f, 0.f, 0.f);
+	const float right = topBtnRect(mode == Phrase ? 3 : 2).left - 4.f * dpi;
+	float left = right - textWidth(Lang::get(L"clip.undock"), 12.f) - 20.f * dpi;
+	// 窗口太窄、会压到"管理后台"上：只画一个图标
+	if (left < adminLinkRect().right + 6.f * dpi) {
+		left = right - 28.f * dpi;
+		if (compact) *compact = true;
+	}
+	return D2D1::RectF(left, 9.f * dpi, right, 37.f * dpi);
+}
+
+void WinClip::undock()
+{
+	if (dockEdge == 0 || closing) return;
+	const int edge = dockEdge;
+	dockEdge = 0;
+	killTimer(timerAnim);
+	animating = false;
+	RECT rect{};
+	if (GetWindowRect(hwnd, &rect)) {
+		// 离开那条边一点，看得出已经不是贴着的了
+		const int gap = (int)(16 * dpi);
+		int posX = rect.left, posY = rect.top;
+		if (edge == 1) posX += gap;
+		else if (edge == 2) posY += gap;
+		else if (edge == 3) posX -= gap;
+		else if (edge == 4) posY -= gap;
+		SetWindowPos(hwnd, nullptr, posX, posY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+		Setting::get()->setClipPos(posX, posY);
+	}
+	Setting::get()->setDockEdge(0); //里面会停掉"鼠标顶边"的监视
+	toast(Lang::get(L"clip.dockOff"));
 }
 
 D2D1_RECT_F WinClip::topBtnRect(int which) const
@@ -926,6 +964,17 @@ void WinClip::paint(ID2D1DeviceContext* ctx)
 	topBtn(1, Hit::Top1, L"📌", 13.f, pinned ? theme : 0x999999, pinned);
 	// 设置：软件的设置窗口只从这里进
 	topBtn(2, Hit::Top2, L"⚙", 15.f, mode == Settings ? theme : hover == Hit::Top2 ? 0x333333 : 0x999999, mode == Settings);
+	// 贴边时多一个"取消靠边"：描边的小按钮，同"管理后台"
+	bool undockCompact{ false };
+	if (auto rect = undockRect(&undockCompact); rect.right > rect.left) {
+		const bool hot = hover == Hit::Undock;
+		const UINT rgb = hot ? theme : 0x777777;
+		brush->SetColor(col(hot ? theme : 0x000000, hot ? 0.12f : 0.f));
+		ctx->FillRoundedRectangle(D2D1::RoundedRect(rect, 5.f * dpi, 5.f * dpi), brush.Get());
+		brush->SetColor(col(rgb, 0.5f));
+		ctx->DrawRoundedRectangle(D2D1::RoundedRect(D2D1::RectF(rect.left + dpi * 0.5f, rect.top + 2.f * dpi, rect.right - dpi * 0.5f, rect.bottom - 2.f * dpi), 5.f * dpi, 5.f * dpi), brush.Get(), dpi);
+		drawText(ctx, undockCompact ? L"⇱" : Lang::get(L"clip.undock"), undockCompact ? 14.f : 12.f, rect, rgb, true, true);
+	}
 	if (mode == Settings) return;   //下面整块是设置的内容（盖在画布上面的节点），画布上不用画
 	if (mode == Phrase) topBtn(3, Hit::Top3, L"＋", 16.f, theme, false);
 	if (mode == Work) {
@@ -2253,6 +2302,7 @@ WinClip::Hit WinClip::hitTest(POINT pos, int& index)
 		if (inRect(topBtnRect(1))) return Hit::Top1;
 		if (inRect(topBtnRect(2))) return Hit::Top2;
 		if (mode == Phrase && inRect(topBtnRect(3))) return Hit::Top3;
+		if (inRect(undockRect())) return Hit::Undock;
 		const float modeW = modeTabW * dpi;
 		const int i = (int)((px - pad) / modeW);
 		if (py >= 8.f * dpi && py < 38.f * dpi && px >= pad && i >= 0 && i < modeCount) {
@@ -2411,6 +2461,9 @@ void WinClip::onDown(POINT pos, bool isRight)
 		mouseEntered = true;
 		outTicks = 0;
 		toast(Lang::get(pinned ? L"clip.pinOn" : L"clip.pinOff"));
+	}
+	else if (hit == Hit::Undock) {
+		undock();
 	}
 	else if (hit == Hit::Top2) {
 		// 齿轮：进设置；已经在设置里就回到原来那一页。推到下一轮消息循环做（要建 / 拆节点）
