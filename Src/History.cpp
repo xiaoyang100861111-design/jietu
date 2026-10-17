@@ -120,9 +120,14 @@ void History::removeHoverShape()
 
 void History::removeShape(ShapeBase* target)
 {
+    // 只删 target 本身。以前 erase 写在 if 外面，第一轮就把 shapes[0]（最早画的那个）删了：
+    // 选着画笔在空白处点一下（双击的前半下也是），抬手时丢弃空元素就会把用户画的第一个框 / 箭头删掉。
+    // 找不到 target（ShapeText 的异步删除排到时它可能已被 removeUndoShape 清掉）就什么都不做
     for (auto it = shapes.begin(); it != shapes.end(); ++it) {
-        if (it->get() == target) {
-			win->shapeHover = nullptr; 
+        if (it->get() != target) continue;
+        // hover 指针指向的正是要销毁的那个元素时必须清掉，否则下一次绘制/命中就是野指针
+        if (win->shapeHover == target) {
+            win->shapeHover = nullptr;
         }
         shapes.erase(it);
         win->refresh();
