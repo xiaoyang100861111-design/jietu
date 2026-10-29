@@ -55,6 +55,8 @@ public:
 	// 本次按下之后光标有没有真的移动过。判"按下马上弹起"只认这个，
 	// 不去看各 shape 的几何 —— 那些成员的初值状态不一，不可靠
 	bool hasDragged{ false };
+	// 提示框（OCR 结果、复制失败）开着。这期间工具条（ToolMain）上除了 × 都不响应，免得在框底下又开别的
+	bool textDialogOpen{ false };
 	std::unique_ptr<History> history;
 	// 贴图窗口的底图。ShapeMosaic 要读它算马赛克块，ShapeEraser 拿它当"擦回原样"的画刷
 	Microsoft::WRL::ComPtr<ID2D1Bitmap1> screenImg;

@@ -5,4 +5,5 @@
 // （MB_OK / MB_OKCANCEL / MB_YESNO / MB_YESNOCANCEL，图标，MB_DEFBUTTON2；返回 IDOK / IDCANCEL / IDYES / IDNO），
 // 也是弹出来就卡住调用的地方，等用户点了才返回。跟着黑夜模式和主题色走。
 // 只能在 UI 线程调。崩溃报告那两处还是用系统的（那时候程序状态已经不可信了）
+// 传了 owner：框挂在主人上面（主人被点也盖不住它），主人被关掉时框跟着没、按取消返回
 int UUMessageBox(HWND owner, const wchar_t* text, const wchar_t* title, UINT flags);

@@ -144,6 +144,8 @@ void ToolMain::onClick(Ling::Button* btn)
 		win->close();
 		return;
 	}
+	// 提示框开着（它在自己的消息循环里等用户点）：别的按钮先不理，× 一直能用
+	if (win->textDialogOpen) return;
 	// 下面这几个都是"执行一次动作"而不是"切换绘图工具"，做完就返回，不动 curId 和选中态。
 	// undo/redo 由 History 内部负责 refresh；save/clipboard 成功后会关窗，同样不能往下走。
 	else if (btn->id == L"undo") {

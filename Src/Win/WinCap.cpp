@@ -794,8 +794,8 @@ void WinCap::onTextWorkDone(const Translate::Result& res, bool translate, int cw
         // 文字太多时弹框会高出屏幕，只预览开头一段，写进剪切板的是全文
         auto preview = res.text.size() > 1200 ? res.text.substr(0, 1200) + L"…" : res.text;
         auto tip = preview + L"\n\n" + Lang::get(L"cap.ocrCopy");
-        if (UUMessageBox(nullptr, tip.data(), title.data(), MB_OKCANCEL | flags) == IDOK) {
-            Ling::Util::setTextToClipboard(res.text);
+        if (UUMessageBox(nullptr, tip.data(), title.data(), MB_OKCANCEL | flags) == IDOK && !Util::setTextToClipboard(res.text)) {
+            UUMessageBox(nullptr, Lang::get(L"cap.clipBusy").data(), title.data(), MB_OK | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND);
         }
     }
     close();
@@ -818,8 +818,8 @@ void WinCap::startQrcode()
     }
     else {
         auto tip = text + L"\n\n" + Lang::get(L"cap.qrcodeCopy");
-        if (UUMessageBox(nullptr, tip.data(), title.data(), MB_OKCANCEL | MB_ICONINFORMATION) == IDOK) {
-            Ling::Util::setTextToClipboard(text);
+        if (UUMessageBox(nullptr, tip.data(), title.data(), MB_OKCANCEL | MB_ICONINFORMATION) == IDOK && !Util::setTextToClipboard(text)) {
+            UUMessageBox(nullptr, Lang::get(L"cap.clipBusy").data(), title.data(), MB_OK | MB_ICONWARNING);
         }
     }
     close();
@@ -859,8 +859,12 @@ void WinCap::copyToClipboard()
     std::vector<BYTE> pixels;
     int cw{ 0 }, ch{ 0 };
     if (!getCutPixels(pixels, cw, ch)) return;
-    Util::saveToClipboard(cw, ch, pixels.data());
-    close();
+    if (Util::saveToClipboard(cw, ch, pixels.data())) {
+        close();
+        return;
+    }
+    // 剪切板被别的程序占着：不关窗（关了截的图就丢了），提示用户再点一次
+    UUMessageBox(hwnd, Lang::get(L"cap.clipBusy").data(), Lang::get(L"about.sysTip").data(), MB_OK | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND);
 }
 
 // 从底图上把选区那块像素读回来。screenImg 在 GPU 上，不能直接 Map，

@@ -264,6 +264,11 @@ namespace {
 		case WM_CLOSE:
 			finish(*st, cancelId(*st));
 			return 0;
+		case WM_DESTROY:
+			// 主人窗口被关掉时系统会连带销毁这个框（比如 OCR 结果框开着，用户点了贴图工具条上的 ×）。
+			// 不在这里收尾的话 done 永远等不到，下面的消息循环就一直空转，进程退不掉
+			if (!st->done) finish(*st, cancelId(*st));
+			return 0;
 		}
 		return DefWindowProc(hwnd, msg, wp, lp);
 	}

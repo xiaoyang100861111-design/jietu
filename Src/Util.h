@@ -10,7 +10,14 @@ class Util
 public:
 	// 同时写入 CF_DIBV5（Office / 微信 / WPS 这类原生程序认）和 "PNG" 注册格式
 	//（浏览器 / Electron 程序认），两份都带 alpha
-	static void saveToClipboard(const int w, const int h, BYTE* data);
+	// 返回 false = 剪切板一直被别的程序占着，没写进去（调用方要提示用户，别当成功关窗）
+	static bool saveToClipboard(const int w, const int h, BYTE* data);
+	// 写文字。别的程序（剪切板管理器、远程桌面、输入法……）正开着剪切板时会重试一小会儿，
+	// 还不行就返回 false。不再用 Ling::Util::setTextToClipboard：它只试一次、失败不吭声
+	static bool setTextToClipboard(const std::wstring& text);
+	// 打开剪切板，打不开就隔 25 毫秒再试，最多约半秒。打开时用自己的隐藏窗口当主人：
+	// 用 NULL 打开再 EmptyClipboard，文档上写着之后的 SetClipboardData 会失败
+	static bool openClipboard();
 	// 编码成 PNG 放进内存（上传给在线识别接口用）
 	static bool encodePngBytes(const int w, const int h, BYTE* data, std::vector<BYTE>& out);
 	static bool saveToFile(const std::wstring& path, const int w, const int h, BYTE* data);

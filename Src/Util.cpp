@@ -6,6 +6,7 @@
 #include "Util.h"
 #include "Lang.h"
 #include "Setting.h"
+#include "Log.h"
 #include "quirc/quirc.h"
 
 using Microsoft::WRL::ComPtr;
@@ -74,38 +75,78 @@ namespace {
 	}
 }
 
-void Util::saveToClipboard(const int w, const int h, BYTE* data)
+bool Util::openClipboard()
 {
-	if (w <= 0 || h <= 0 || !data) return;
+	// 只收消息的隐藏窗口，专门当剪切板的主人。建在 UI 线程上，进程退出时随线程一起没
+	static HWND owner = CreateWindowEx(0, L"STATIC", L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, GetModuleHandle(nullptr), nullptr);
+	for (int i = 0; i < 20; i++) {
+		if (OpenClipboard(owner)) return true;
+		Sleep(25);
+	}
+	Log::write(L"ERROR clipboard busy, owner pid " + std::to_wstring([] {
+		DWORD pid{ 0 };
+		if (auto who = GetOpenClipboardWindow()) GetWindowThreadProcessId(who, &pid);
+		return pid;
+	}()));
+	return false;
+}
+
+bool Util::setTextToClipboard(const std::wstring& text)
+{
+	const size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+	auto mem = GlobalAlloc(GMEM_MOVEABLE, bytes);
+	if (!mem) return false;
+	auto ptr = GlobalLock(mem);
+	if (!ptr) {
+		GlobalFree(mem);
+		return false;
+	}
+	memcpy(ptr, text.c_str(), bytes);
+	GlobalUnlock(mem);
+	if (!openClipboard()) {
+		GlobalFree(mem);
+		return false;
+	}
+	EmptyClipboard();
+	// 成功后内存归剪切板所有，只在失败时自己释放
+	const bool ok = SetClipboardData(CF_UNICODETEXT, mem) != nullptr;
+	if (!ok) GlobalFree(mem);
+	CloseClipboard();
+	return ok;
+}
+
+bool Util::saveToClipboard(const int w, const int h, BYTE* data)
+{
+	if (w <= 0 || h <= 0 || !data) return false;
 	DWORD rowBytes = (DWORD)w * 4;
 	DWORD imgBytes = rowBytes * (DWORD)h;
 
 	// ---------- 1) PNG 编码到内存流 ----------
 	ComPtr<IStream> pngStream;
-	if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, pngStream.GetAddressOf()))) return;
-	if (!encodePng(pngStream.Get(), w, h, data)) return;
+	if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, pngStream.GetAddressOf()))) return false;
+	if (!encodePng(pngStream.Get(), w, h, data)) return false;
 	// 流内部的 HGLOBAL 尺寸可能大于实际字节数，拷一份精确大小的出来给剪切板
 	STATSTG stat{};
-	if (FAILED(pngStream->Stat(&stat, STATFLAG_NONAME))) return;
+	if (FAILED(pngStream->Stat(&stat, STATFLAG_NONAME))) return false;
 	SIZE_T pngSize = (SIZE_T)stat.cbSize.QuadPart;
-	if (pngSize == 0) return;
+	if (pngSize == 0) return false;
 	HGLOBAL hPngSrc{ nullptr };
-	if (FAILED(GetHGlobalFromStream(pngStream.Get(), &hPngSrc)) || !hPngSrc) return;
+	if (FAILED(GetHGlobalFromStream(pngStream.Get(), &hPngSrc)) || !hPngSrc) return false;
 	auto srcPtr = GlobalLock(hPngSrc);
-	if (!srcPtr) return;
+	if (!srcPtr) return false;
 	HGLOBAL hPng = GlobalAlloc(GMEM_MOVEABLE, pngSize);
-	if (!hPng) { GlobalUnlock(hPngSrc); return; }
+	if (!hPng) { GlobalUnlock(hPngSrc); return false; }
 	auto dstPtr = GlobalLock(hPng);
-	if (!dstPtr) { GlobalUnlock(hPngSrc); GlobalFree(hPng); return; }
+	if (!dstPtr) { GlobalUnlock(hPngSrc); GlobalFree(hPng); return false; }
 	CopyMemory(dstPtr, srcPtr, pngSize);
 	GlobalUnlock(hPng);
 	GlobalUnlock(hPngSrc);
 
 	// ---------- 2) 构造 CF_DIBV5（带 alpha） ----------
 	HGLOBAL hDibV5 = GlobalAlloc(GMEM_MOVEABLE, sizeof(BITMAPV5HEADER) + imgBytes);
-	if (!hDibV5) { GlobalFree(hPng); return; }
+	if (!hDibV5) { GlobalFree(hPng); return false; }
 	auto pv5 = static_cast<BYTE*>(GlobalLock(hDibV5));
-	if (!pv5) { GlobalFree(hDibV5); GlobalFree(hPng); return; }
+	if (!pv5) { GlobalFree(hDibV5); GlobalFree(hPng); return false; }
 	auto bv5 = reinterpret_cast<BITMAPV5HEADER*>(pv5);
 	*bv5 = {};
 	bv5->bV5Size = sizeof(BITMAPV5HEADER);
@@ -132,9 +173,9 @@ void Util::saveToClipboard(const int w, const int h, BYTE* data)
 	DWORD dibRowBytes = ((DWORD)w * 3 + 3) & ~3u;
 	DWORD dibImgBytes = dibRowBytes * (DWORD)h;
 	HGLOBAL hDib = GlobalAlloc(GMEM_MOVEABLE, sizeof(BITMAPINFOHEADER) + dibImgBytes);
-	if (!hDib) { GlobalFree(hDibV5); GlobalFree(hPng); return; }
+	if (!hDib) { GlobalFree(hDibV5); GlobalFree(hPng); return false; }
 	auto pDib = static_cast<BYTE*>(GlobalLock(hDib));
-	if (!pDib) { GlobalFree(hDib); GlobalFree(hDibV5); GlobalFree(hPng); return; }
+	if (!pDib) { GlobalFree(hDib); GlobalFree(hDibV5); GlobalFree(hPng); return false; }
 	auto bi = reinterpret_cast<BITMAPINFOHEADER*>(pDib);
 	*bi = {};
 	bi->biSize = sizeof(BITMAPINFOHEADER);
@@ -157,11 +198,11 @@ void Util::saveToClipboard(const int w, const int h, BYTE* data)
 	GlobalUnlock(hDib);
 
 	// ---------- 4) 写入剪切板 ----------
-	if (!OpenClipboard(nullptr)) {
+	if (!openClipboard()) {
 		GlobalFree(hDib);
 		GlobalFree(hDibV5);
 		GlobalFree(hPng);
-		return;
+		return false;
 	}
 	EmptyClipboard();
 	// SetClipboardData 成功后 HGLOBAL 归剪切板所有，不能再 GlobalFree；失败了才要自己释放
@@ -176,6 +217,7 @@ void Util::saveToClipboard(const int w, const int h, BYTE* data)
 		GlobalFree(hPng);
 	}
 	CloseClipboard();
+	return true;
 }
 
 bool Util::saveToFile(const std::wstring& path, const int w, const int h, BYTE* data)
@@ -259,7 +301,7 @@ std::vector<BYTE> Util::captureScreen(const int x, const int y, const int w, con
 
 void Util::addFileToClipboard(const std::wstring& filePath)
 {
-	if (!OpenClipboard(nullptr)) return;
+	if (!openClipboard()) return;
 	EmptyClipboard();
 	// DROPFILES 之后紧跟双 \0 结尾的路径列表，这里只放一条
 	auto totalSize = sizeof(DROPFILES) + (filePath.length() + 2) * sizeof(wchar_t);

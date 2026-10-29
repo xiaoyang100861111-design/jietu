@@ -649,8 +649,18 @@ void WinPin::copyToClipboard()
 	std::vector<BYTE> pixels;
 	D2D1_SIZE_U size{};
 	if (!getImagePixels(pixels, size)) return;
-	Util::saveToClipboard((int)size.width, (int)size.height, pixels.data());
-	close();
+	if (Util::saveToClipboard((int)size.width, (int)size.height, pixels.data())) {
+		close();
+		return;
+	}
+	// 剪切板被别的程序占着：以前照样关窗，截的图就这么丢了。现在留着窗口，告诉用户再点一次
+	const HWND self = hwnd;
+	textDialogOpen = true;
+	UUMessageBox(self, Lang::get(L"cap.clipBusy").data(), Lang::get(L"about.sysTip").data(), MB_OK | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND);
+	if (IsWindow(self)) {
+		textDialogOpen = false;
+		restoreWindowState(nullptr);   //框关掉时贴图被激活会盖住工具条，压回去
+	}
 }
 
 void WinPin::startRecord()
@@ -705,21 +715,42 @@ void WinPin::onTextWorkDone(const Translate::Result& res, bool translate, D2D1_S
 			return;
 		}
 	}
-	// 剩下的都要弹框。弹框开着的时候用户仍然可以把本窗口关掉，
-	// 所以从这里往下不再碰 this，要用的东西先取到局部变量里
+	// 剩下的都要弹框。框挂在本窗口上（owner）：贴图和工具条都是 topmost，以前框没有主人，
+	// 用户一点贴图，贴图就盖到框上面，框又不在任务栏里，看上去就是截图卡死了，点 × 也像没反应。
+	// 弹框开着的时候用户仍然可以点工具条上的 × 把本窗口关掉（框会跟着没，按取消返回），
+	// 所以从这里往下不再碰 this，要用的东西先取到局部变量里；还要用的时候先 IsWindow 确认窗口还在
+	const HWND self = hwnd;
 	auto title = Lang::get(L"about.sysTip");
 	const UINT flags = MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND;
 	if (!res.ok || translate) {
 		auto msg = res.ok ? Lang::get(L"translate.failed") : res.err;
-		UUMessageBox(nullptr, msg.data(), title.data(), MB_OK | flags);
+		textDialogOpen = true;
+		UUMessageBox(self, msg.data(), title.data(), MB_OK | flags);
+		if (IsWindow(self)) {
+			textDialogOpen = false;
+			restoreWindowState(nullptr);
+		}
 		return;
 	}
 	// 文字太多时弹框会高出屏幕，只预览开头一段，写进剪切板的是全文
 	auto text = res.text;
 	auto preview = text.size() > 1200 ? text.substr(0, 1200) + L"…" : text;
 	auto tip = preview + L"\n\n" + Lang::get(L"cap.ocrCopy");
-	if (UUMessageBox(nullptr, tip.data(), title.data(), MB_OKCANCEL | flags) == IDOK) {
-		Ling::Util::setTextToClipboard(text);
+	textDialogOpen = true;
+	const auto choice = UUMessageBox(self, tip.data(), title.data(), MB_OKCANCEL | flags);
+	const bool alive = IsWindow(self);
+	if (alive) {
+		textDialogOpen = false;
+		restoreWindowState(nullptr);
+	}
+	if (choice != IDOK) return;
+	if (Util::setTextToClipboard(text)) return;
+	// 剪切板被别的程序占着。窗口已经被关掉的话框就没有主人，单独弹
+	if (alive) textDialogOpen = true;
+	UUMessageBox(alive ? self : nullptr, Lang::get(L"cap.clipBusy").data(), title.data(), MB_OK | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND);
+	if (alive && IsWindow(self)) {
+		textDialogOpen = false;
+		restoreWindowState(nullptr);
 	}
 }
 
