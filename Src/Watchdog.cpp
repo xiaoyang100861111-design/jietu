@@ -11,6 +11,8 @@ namespace {
 	HWND probeHwnd{ nullptr };
 	DWORD uiThreadId{ 0 };
 	std::atomic<bool> stopped{ false };
+	// 大于 0 就是界面线程说了它要故意等一会儿（见 Watchdog::pause），只在界面线程上加减
+	std::atomic<int> paused{ 0 };
 	constexpr DWORD intervalMs{ 3000 };     // 两次探测之间隔多久
 	constexpr DWORD probeTimeoutMs{ 3000 }; // 一次探测最多等多久
 	constexpr int maxMisses{ 10 };          // 连着这么多次没人接才算卡死（约 30 秒以上）
@@ -39,6 +41,12 @@ namespace {
 		while (!stopped) {
 			Sleep(intervalMs);
 			if (stopped) break;
+			// 界面线程正故意等着（停录屏时等编码线程收尾）：不探测，之前数的次数也作废
+			if (paused > 0) {
+				misses = 0;
+				hungSince = 0;
+				continue;
+			}
 			// 窗口没了只会是界面线程正常退出了（只收消息的窗口随线程一起销毁），不用再盯
 			if (!IsWindow(probeHwnd)) break;
 			const auto before = GetTickCount64();
@@ -85,4 +93,15 @@ void Watchdog::init()
 void Watchdog::stop()
 {
 	stopped = true;
+}
+
+void Watchdog::pause()
+{
+	++paused;
+}
+
+void Watchdog::resume()
+{
+	// 多 resume 了一次也别让计数变负：负数要再 pause 一次才回到 0，那一段就白暂停了
+	if (paused.fetch_sub(1) <= 0) paused = 0;
 }

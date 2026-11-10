@@ -8,6 +8,7 @@
 #include "../App.h"
 #include "../Setting.h"
 #include "../Lang.h"
+#include "../Watchdog.h"
 // VideoMp4.hpp / VideoGif.hpp 里用的是裸 ComPtr，本项目的 pch 没有这条 using，
 // 在包含它们之前补上，头文件本身保持原样。
 using namespace Microsoft::WRL;
@@ -226,6 +227,9 @@ std::wstring CapVideo::stop()
         filePath = gifParam->path;
     }
     if (captureThread.joinable()) {
+        // 等编码线程收尾（GIF 的 gifski 收尾、MP4 的 Finalize），长录像可能要几十秒。
+        // 这期间界面线程故意不泵消息，先把看门狗停了，别被当成卡死把进程杀掉、录像丢了
+        Watchdog::Pause pause;
         captureThread.join();
     }
     // 刚开录就点了停止，一帧都没采到 —— 这时 Finalize 出来的是个 0 字节的空壳。

@@ -14,4 +14,16 @@ public:
 	static void init();
 	// 消息循环退出之后调：收尾阶段界面线程不再泵消息是正常的，别再盯着
 	static void stop();
+	// 界面线程要故意等一会儿（停录屏时等编码线程收尾：GIF 的 gifski 收尾、MP4 的 Finalize，
+	// 长录像可能要几十秒）时先 pause，等完 resume：这期间不探测，之前数的次数也作废。
+	// 是计数的，可以嵌套；必须成对，所有返回路径都得 resume —— 用下面的 Pause 最省心
+	static void pause();
+	static void resume();
+	// 作用域内暂停：构造 pause、析构 resume，异常和提前 return 都不会漏掉 resume
+	struct Pause {
+		Pause() { Watchdog::pause(); }
+		~Pause() { Watchdog::resume(); }
+		Pause(const Pause&) = delete;
+		Pause& operator=(const Pause&) = delete;
+	};
 };
