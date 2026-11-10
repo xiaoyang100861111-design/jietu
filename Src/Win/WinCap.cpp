@@ -1,4 +1,7 @@
 #include "pch.h"
+#include <algorithm>
+#include <cmath>
+#include <format>
 #include "../MsgBox.h"
 #include <include/Ling.h>
 #include "WinCap.h"
@@ -7,6 +10,7 @@
 #include "../App.h"
 #include "../Util.h"
 #include "../Lang.h"
+#include "../Log.h"
 #include "../Update.h"
 #include "CapLong.h"
 #include "CapVideo.h"
@@ -18,6 +22,36 @@ namespace
     constexpr float scaleNum{ 5.f }, srcW{ 50.f }, srcH{ 30.f };
     constexpr float pixImgH{ scaleNum * srcH };
     constexpr float pixW{ srcW * scaleNum };
+    // 浮层提示到点自动关窗的定时器。本窗口的定时器是和 CapLong 共用的（它用 18、19），按 id 分流
+    constexpr UINT tipTimerId{ 21 };
+    // 浮层上最多显示这么多行、每行这么多字，再长的截掉：用户来不及看，屏幕上也放不下
+    constexpr size_t tipMaxLines{ 6 }, tipMaxLineChars{ 60 };
+    constexpr float tipMaxW{ 520.f };   // 浮层最宽多少逻辑像素，乘 dpi 之后才是物理像素
+
+    std::wstring clipTipText(const std::wstring& text)
+    {
+        std::wstring result;
+        size_t lines{ 0 }, pos{ 0 };
+        bool more{ false };
+        while (pos <= text.size()) {
+            if (lines == tipMaxLines) {
+                more = pos < text.size();
+                break;
+            }
+            auto end = text.find(L'\n', pos);
+            if (end == std::wstring::npos) end = text.size();
+            auto line = text.substr(pos, end - pos);
+            if (!line.empty() && line.back() == L'\r') line.pop_back();
+            if (line.size() > tipMaxLineChars) line = line.substr(0, tipMaxLineChars - 1) + L"…";
+            if (lines > 0) result += L'\n';
+            result += line;
+            lines++;
+            if (end == text.size()) break;
+            pos = end + 1;
+        }
+        if (more) result += L"…";
+        return result;
+    }
 }
 
 std::unique_ptr<WinCap> winCap;
@@ -31,8 +65,16 @@ WinCap::WinCap() : Ling::WinBase()
     onMouseMove.add([this](POINT pos) { this->onMove(pos); });
     onMouseUp.add([this](POINT pos, bool isRight) { this->onUp(pos, isRight); });
     onKeyDown.add([this](UINT key) { this->onKey(key); });
+    // 定时器按 id 分流：浮层提示到点就关窗（用完即走模式下窗口关掉进程就退出）；
     // 滚动截图的定时器借的是本窗口的，转给 CapLong
-    onTimer.add([this](UINT id) { if (capLong) capLong->onTimerCB(id); });
+    onTimer.add([this](UINT id) {
+        if (id == tipTimerId) {
+            killTimer(tipTimerId);
+            close();
+            return;
+        }
+        if (capLong) capLong->onTimerCB(id);
+    });
     onDestroy.add([this]() { this->onClosed(); });
     // DPI 变了（用户改了缩放比例）：系统会按新旧缩放比把窗口整体缩放一圈，但本窗口是铺满整个
     // 虚拟桌面的，缩放之后就盖不住桌面了，而且底图、选区（cutMask->maskRect）用的都是物理像素，
@@ -88,7 +130,16 @@ void WinCap::dispose()
 
 void WinCap::onCreated()
 {
-    App::get()->takeScreenShot(x, y, w, h, &screenImg);
+    const auto hr = App::get()->takeScreenShot(x, y, w, h, &screenImg);
+    if (!screenImg) {
+        // 底图都没有，后面什么都干不了（以前接着往下走，取色放大镜一碰空位图就崩）。
+        // 这会儿还在 createNativeWindow 里面，等它收完尾再关窗；用完即走模式下窗口关掉进程就退出
+        Log::write(std::format(L"ERROR screenshot: CreateBitmap failed, hr=0x{:08X} ({}x{})", static_cast<uint32_t>(hr), (int)w, (int)h));
+        Ling::App::get()->dq.TryEnqueue([]() {
+            if (auto win = WinCap::get()) win->close();
+        });
+        return;
+    }
 	auto d2d = Ling::D2D::get();
     // 画布铺满窗口，走 swap chain（双缓冲）后端，避免调整选区时整帧闪烁
     canvas = body->makeChild<Ling::Canvas>();
@@ -96,6 +147,7 @@ void WinCap::onCreated()
     canvas->setSizePercent(100.f, 100.f);
     d2d->deviceContext->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), brushText.GetAddressOf());
     d2d->deviceContext->CreateSolidColorBrush(D2D1::ColorF(0x000000, 0.56f), brushBg.GetAddressOf());
+    d2d->deviceContext->CreateSolidColorBrush(D2D1::ColorF(0x000000, 0.8f), brushTipBg.GetAddressOf());
     d2d->deviceContext->CreateSolidColorBrush(D2D1::ColorF(0.1f, 0.5f, 1.f, 0.5f), crossBrush.GetAddressOf());
     POINT pos;
     GetCursorPos(&pos);
@@ -120,12 +172,13 @@ void WinCap::layout()
     if (!ctx) return;
     ctx->Clear(0);
     D2D1_RECT_F destRect = D2D1::RectF(0, 0, (float)w, (float)h);
-    if (!hideScreenImg) {
+    if (!hideScreenImg && screenImg) {
         ctx->DrawBitmap(screenImg.Get(), destRect);
     }
     cutMask->paint(ctx);
     if (capLong) capLong->paint(ctx);
     paintPix(ctx);
+    paintTip(ctx);
     canvas->finishPaint();
 }
 
@@ -133,6 +186,10 @@ BOOL WinCap::setCursor()
 {
     if (textWorking) {
         SetCursor(LoadCursor(nullptr, IDC_WAIT));
+        return TRUE;
+    }
+    if (tipShowing) {
+        SetCursor(LoadCursor(nullptr, IDC_ARROW));
         return TRUE;
     }
     if (stage == CapStage::Select) {
@@ -192,7 +249,7 @@ void WinCap::setPixPos(POINT pos)
 
 void WinCap::getPixImg(POINT pos)
 {
-    if (isPress || stage != CapStage::Select) return;
+    if (isPress || stage != CapStage::Select || !screenImg) return;
     const long sw = static_cast<long>(srcW), sh = static_cast<long>(srcH);
     const long iw = static_cast<long>(w), ih = static_cast<long>(h);
     // 期望的源矩形：以光标为正中心，可以越出屏幕。
@@ -284,6 +341,11 @@ void WinCap::onKey(UINT key)
         ReleaseDC(NULL, hScreen);
         return cr;
     };
+    // 浮层提示显示着：按什么键都是"看到了"，直接关窗
+    if (tipShowing) {
+        close();
+        return;
+    }
     if (key == VK_ESCAPE) {
         close();
     }
@@ -378,6 +440,7 @@ std::tuple<int, int, int, int> WinCap::getCMYK(const BYTE& r, const BYTE& g, con
 ComPtr<ID2D1Bitmap1> WinCap::getCutImg()
 {
     ComPtr<ID2D1Bitmap1> cutImg;
+    if (!screenImg) return cutImg;
     auto& maskRect = cutMask->maskRect;
     const UINT32 cw = (UINT32)(maskRect.right - maskRect.left);
     const UINT32 ch = (UINT32)(maskRect.bottom - maskRect.top);
@@ -402,7 +465,8 @@ LRESULT WinCap::onHitTest(const POINT pos)
 
 void WinCap::onDown(POINT pos, bool isRight)
 {
-    if (isRight) {
+    // 浮层提示显示着：点哪儿都是"看到了"，直接关窗（右键本来就是关窗）
+    if (isRight || tipShowing) {
         close();
         return;
     }
@@ -779,26 +843,81 @@ void WinCap::onTextWorkDone(const Translate::Result& res, bool translate, int cw
         close();
         return;
     }
-    // 剩下的都要弹框。同 startQrcode：先 hide 让弹框独占桌面，弹框关了再真正退场
+    if (!res.ok || translate) {
+        // 没认出文字 / 翻译失败：不再弹模态框 —— 它的嵌套消息循环曾把界面线程卡成残影，
+        // 结束调用方也没用，只能结束本进程。改成在本窗口的画布上浮一条提示，到点自己关窗。
+        // "未识别到文字"是常态，日志不记成 ERROR（Report 只传 ERROR 开头的行）
+        auto text = res.ok ? Lang::get(L"translate.failed") : res.err;
+        auto firstLine = text.substr(0, text.find(L'\n'));
+        if (!firstLine.empty() && firstLine.back() == L'\r') firstLine.pop_back();
+        Log::write(std::format(L"ocr/translate: {} ({}x{})", firstLine, cw, ch));
+        showTip(text);
+        return;
+    }
+    // 只做文字识别：认出来的文字弹框给用户看，点确定写进剪切板。
+    // 同 startQrcode：先 hide 让弹框独占桌面，弹框关了再真正退场
     hide();
     if (toolCap) toolCap->hide();
     auto title = Lang::get(L"about.sysTip");
     const UINT flags = MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND;
-    if (!res.ok) {
-        UUMessageBox(nullptr, res.err.data(), title.data(), MB_OK | flags);
-    }
-    else if (translate) {
-        UUMessageBox(nullptr, Lang::get(L"translate.failed").data(), title.data(), MB_OK | flags);
-    }
-    else {
-        // 文字太多时弹框会高出屏幕，只预览开头一段，写进剪切板的是全文
-        auto preview = res.text.size() > 1200 ? res.text.substr(0, 1200) + L"…" : res.text;
-        auto tip = preview + L"\n\n" + Lang::get(L"cap.ocrCopy");
-        if (UUMessageBox(nullptr, tip.data(), title.data(), MB_OKCANCEL | flags) == IDOK && !Util::setTextToClipboard(res.text)) {
-            UUMessageBox(nullptr, Lang::get(L"cap.clipBusy").data(), title.data(), MB_OK | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND);
-        }
+    // 文字太多时弹框会高出屏幕，只预览开头一段，写进剪切板的是全文
+    auto preview = res.text.size() > 1200 ? res.text.substr(0, 1200) + L"…" : res.text;
+    auto tip = preview + L"\n\n" + Lang::get(L"cap.ocrCopy");
+    if (UUMessageBox(nullptr, tip.data(), title.data(), MB_OKCANCEL | flags) == IDOK && !Util::setTextToClipboard(res.text)) {
+        UUMessageBox(nullptr, Lang::get(L"cap.clipBusy").data(), title.data(), MB_OK | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND);
     }
     close();
+}
+
+void WinCap::showTip(const std::wstring& text)
+{
+    tipText = clipTipText(text);
+    tipShowing = true;
+    if (toolCap) toolCap->hide();
+    // 等待光标是 startTextWork 设的，结果回来了就换回箭头。WM_SETCURSOR 要等鼠标动了才来，这里先主动换一次
+    SetCursor(LoadCursor(nullptr, IDC_ARROW));
+    // 显示多久：1.8 秒起，超过 20 字每多 20 字加 0.3 秒，最多 6 秒。到点在 onTimer 里关窗
+    const auto chars = (size_t)std::count_if(tipText.begin(), tipText.end(), [](wchar_t c) { return c != L'\n'; });
+    UINT ms{ 1800 };
+    if (chars > 20) ms += (UINT)((chars - 20 + 19) / 20) * 300;
+    setTimer((std::min)(ms, 6000u), tipTimerId);
+    refresh();
+}
+
+void WinCap::paintTip(ID2D1DeviceContext* ctx)
+{
+    if (!tipShowing || tipText.empty() || !brushTipBg || !brushText) return;
+    const float fontSize{ 14.f * dpi }, padX{ 20.f * dpi }, padY{ 14.f * dpi }, radius{ 8.f * dpi };
+    auto layout = Ling::D2D::makeTextLayout(tipText, fontSize, tipMaxW * dpi - padX * 2.f);
+    if (!layout) return;
+    DWRITE_TEXT_METRICS tm{};
+    layout->GetMetrics(&tm);
+    // 盒子按文字实际占的宽度收紧，各行在盒子里居中
+    const float textW = std::ceil(tm.widthIncludingTrailingWhitespace) + 1.f, textH = std::ceil(tm.height);
+    layout->SetMaxWidth(textW);
+    layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    const float boxW = textW + padX * 2.f, boxH = textH + padY * 2.f;
+    // 居中在选区中央；选区放不下这个盒子就居选区所在那块屏幕的中央（坐标都换成本窗口的客户区坐标）
+    auto& r = cutMask->maskRect;
+    float cx = (r.left + r.right) / 2.f, cy = (r.top + r.bottom) / 2.f;
+    if (r.right - r.left < boxW || r.bottom - r.top < boxH) {
+        RECT scr{ x + (int)r.left, y + (int)r.top, x + (int)r.right, y + (int)r.bottom };
+        MONITORINFO mi{ sizeof(MONITORINFO) };
+        if (GetMonitorInfo(MonitorFromRect(&scr, MONITOR_DEFAULTTONEAREST), &mi)) {
+            cx = (mi.rcMonitor.left + mi.rcMonitor.right) / 2.f - x;
+            cy = (mi.rcMonitor.top + mi.rcMonitor.bottom) / 2.f - y;
+        }
+        else {
+            cx = w / 2.f;
+            cy = h / 2.f;
+        }
+    }
+    float left = std::round(cx - boxW / 2.f), top = std::round(cy - boxH / 2.f);
+    left = std::clamp(left, 0.f, (std::max)(0.f, w - boxW));
+    top = std::clamp(top, 0.f, (std::max)(0.f, h - boxH));
+    auto box = D2D1::RoundedRect(D2D1::RectF(left, top, left + boxW, top + boxH), radius, radius);
+    ctx->FillRoundedRectangle(box, brushTipBg.Get());
+    ctx->DrawTextLayout(D2D1::Point2F(left + padX, top + padY), layout.Get(), brushText.Get(), D2D1_DRAW_TEXT_OPTIONS_NONE);
 }
 
 void WinCap::startQrcode()

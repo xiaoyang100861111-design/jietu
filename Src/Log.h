@@ -17,5 +17,8 @@ public:
 	static void exception(const std::wstring& where);
 	// 在 catch 块里调：当前这个异常的说明文字（错误码 + 系统给的解释），给用户看的弹窗里也用它
 	static std::wstring describe();
+	// 从一份寄存器现场一帧一帧往回退，列出调用栈：每帧一行"模块名+偏移"，前面带换行和缩进，
+	// 直接接在日志文字后面就行。崩溃处理记的是出事那一刻的现场，界面线程看门狗记的是卡死线程的现场
+	static std::wstring describeStack(const CONTEXT* ctx);
 	static std::filesystem::path getPath();
 };

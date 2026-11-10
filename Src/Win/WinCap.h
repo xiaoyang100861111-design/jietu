@@ -63,6 +63,11 @@ private:
 	void setPixPos(POINT pos);
 	void getPixImg(POINT pos);
 	void paintPix(ID2D1DeviceContext* ctx);
+	// 识别 / 翻译失败后盖在画布上的浮层提示，代替原来的模态框（模态框的嵌套消息循环
+	// 曾把界面线程卡成残影，只能结束进程）。显示期间任何鼠标按下 / 按键都直接关窗，
+	// 不动就等定时器到点自己关。text 多行的只显示前几行，每行也有长度上限
+	void showTip(const std::wstring& text);
+	void paintTip(ID2D1DeviceContext* ctx);
 	void onKey(UINT key);
 	// Enter 用：把当前阶段手上的图存进剪切板，效果与 Ctrl+C 一致。
 	// 三个阶段各有各的图（选区像素 / 拼好的长图 / 录到的视频），
@@ -119,6 +124,10 @@ private:
 	// 进长图 / 录屏后不再画底图：底图是拖框那一刻的静态截图，
 	// 留着的话录屏和滚动截图拿到的都是这张死图
 	bool hideScreenImg{ false };
+	// 浮层提示正显示着（见 showTip）。这期间鼠标和键盘都只管关窗
+	bool tipShowing{ false };
+	std::wstring tipText;
+	Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushTipBg;
 	Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushBg;
 	Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brushText;
 	Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> crossBrush;

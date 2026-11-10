@@ -12,7 +12,8 @@ class App
 		// 表现为读取访问权限冲突
 		static void dispose();
 		static App* get();
-		void takeScreenShot(int x, int y, int w, int h,ID2D1Bitmap1** img);
+		// 抓屏幕上这块区域做成 D2D 位图。显卡建不出位图时 *img 为空，返回值是失败的 hr（调用方要判空，别拿空位图往下走）
+		HRESULT takeScreenShot(int x, int y, int w, int h,ID2D1Bitmap1** img);
 		std::tuple<int, int, int, int> getScreenArea();
 		// 把窗口从屏幕捕获里摘出去：它在屏幕上照常显示、照常能点，但录屏和抓屏都拿不到它。
 		// 录屏工具条压在录制区内部时（全屏录制必然如此）靠这个才不会被录进去。

@@ -37,31 +37,6 @@ namespace {
 		return std::format(L"0x{:X}", addr);
 	}
 
-	// 从出事那一刻的寄存器现场一帧一帧往回退，记下每一帧的返回地址
-	std::wstring stackOf(const CONTEXT* origin)
-	{
-		std::wstring result;
-#ifdef _M_X64
-		CONTEXT ctx = *origin;
-		for (int i = 0; i < 40 && ctx.Rip != 0; i++) {
-			result += L"\r\n    " + describeAddr(ctx.Rip);
-			DWORD64 base{ 0 };
-			auto func = RtlLookupFunctionEntry(ctx.Rip, &base, nullptr);
-			if (!func) {
-				// 叶子函数没有展开信息：返回地址就在栈顶
-				if (IsBadReadPtr(reinterpret_cast<void*>(ctx.Rsp), sizeof(DWORD64))) break;
-				ctx.Rip = *reinterpret_cast<DWORD64*>(ctx.Rsp);
-				ctx.Rsp += sizeof(DWORD64);
-				continue;
-			}
-			void* handlerData{ nullptr };
-			DWORD64 establisher{ 0 };
-			RtlVirtualUnwind(UNW_FLAG_NHANDLER, base, ctx.Rip, func, &ctx, &handlerData, &establisher, nullptr);
-		}
-#endif
-		return result;
-	}
-
 	LONG WINAPI onCrash(EXCEPTION_POINTERS* info)
 	{
 		// 记日志的过程中又出事了：别再进来，直接让进程结束
@@ -75,7 +50,7 @@ namespace {
 			text += std::format(L" ({} 0x{:X})", rec->ExceptionInformation[0] == 1 ? L"write" : L"read",
 				static_cast<DWORD64>(rec->ExceptionInformation[1]));
 		}
-		text += L"\r\n  stack:" + stackOf(info->ContextRecord);
+		text += L"\r\n  stack:" + Log::describeStack(info->ContextRecord);
 		Log::write(text);
 		auto tip = L"UU截图 出错了，需要关闭。\n\n错误日志已保存到：\n" + logPath.wstring();
 		MessageBox(nullptr, tip.data(), L"UU截图", MB_OK | MB_ICONERROR | MB_TOPMOST | MB_SETFOREGROUND);
@@ -124,6 +99,31 @@ void Log::write(const std::wstring& text)
 	std::ofstream file{ logPath, std::ios::binary | std::ios::app };
 	if (!file) return;
 	file << Ling::Util::convertToStr(L"[" + nowStr() + L"] " + text + L"\r\n");
+}
+
+// 从给定的寄存器现场一帧一帧往回退，记下每一帧的返回地址
+std::wstring Log::describeStack(const CONTEXT* origin)
+{
+	std::wstring result;
+#ifdef _M_X64
+	CONTEXT ctx = *origin;
+	for (int i = 0; i < 40 && ctx.Rip != 0; i++) {
+		result += L"\r\n    " + describeAddr(ctx.Rip);
+		DWORD64 base{ 0 };
+		auto func = RtlLookupFunctionEntry(ctx.Rip, &base, nullptr);
+		if (!func) {
+			// 叶子函数没有展开信息：返回地址就在栈顶
+			if (IsBadReadPtr(reinterpret_cast<void*>(ctx.Rsp), sizeof(DWORD64))) break;
+			ctx.Rip = *reinterpret_cast<DWORD64*>(ctx.Rsp);
+			ctx.Rsp += sizeof(DWORD64);
+			continue;
+		}
+		void* handlerData{ nullptr };
+		DWORD64 establisher{ 0 };
+		RtlVirtualUnwind(UNW_FLAG_NHANDLER, base, ctx.Rip, func, &ctx, &handlerData, &establisher, nullptr);
+	}
+#endif
+	return result;
 }
 
 std::wstring Log::describe()

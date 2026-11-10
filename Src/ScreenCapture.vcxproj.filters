@@ -261,6 +261,14 @@
     <ClInclude Include="Win\VideoMp4.hpp">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="Watchdog.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Watchdog.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Font Include="Res\iconfont.ttf" />

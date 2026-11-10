@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "App.h"
+#include "Watchdog.h"
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPTSTR lpCmdLine, _In_ int nCmdShow)
 {
@@ -10,6 +11,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+    Watchdog::stop(); //下面收尾不再泵消息，别让看门狗当成卡死
     App::dispose(); //趁 COM 还活着把单例拆掉，别留给 CoUninitialize 之后的静态析构
     Ling::dispose();
     return 0;

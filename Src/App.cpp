@@ -15,6 +15,7 @@
 #include "Report.h"
 #include "Sync.h"
 #include "Log.h"
+#include "Watchdog.h"
 #include <shobjidl.h>
 #include <shlguid.h>
 #include <filesystem>
@@ -104,8 +105,9 @@ App* App::get()
     return app.get();
 }
 
-void App::takeScreenShot(int x, int y, int w, int h, ID2D1Bitmap1** img)
+HRESULT App::takeScreenShot(int x, int y, int w, int h, ID2D1Bitmap1** img)
 {
+    *img = nullptr;
     HDC hScreen = GetDC(NULL);
     HDC hDC = CreateCompatibleDC(hScreen);
     HBITMAP hBitmap = CreateCompatibleBitmap(hScreen, w, h);
@@ -129,7 +131,9 @@ void App::takeScreenShot(int x, int y, int w, int h, ID2D1Bitmap1** img)
        .dpiX{96.0f}, .dpiY{96.0f}, .bitmapOptions{D2D1_BITMAP_OPTIONS_NONE}
     };
     auto d2d = Ling::D2D::get();
-    auto hr = d2d->deviceContext->CreateBitmap(D2D1::SizeU(w, h), data.data(), w * 4, props, img);
+    if (!d2d || !d2d->deviceContext) return E_FAIL;
+    // 显存不够、设备丢失时会失败，*img 留空。服务器收到过好几起 getPixImg 里读空指针的崩溃，就是这里失败了没人管
+    return d2d->deviceContext->CreateBitmap(D2D1::SizeU(w, h), data.data(), w * 4, props, img);
 }
 
 std::tuple<int, int, int, int> App::getScreenArea()
@@ -168,6 +172,8 @@ App::App()
     app->onBeforeQuit.add([]() { WinCap::stopIfRecording(); });
     Setting::init();
     Log::init();
+    // 界面线程卡死 30 秒就记日志退出，各种模式都开着：用完即走的截图进程卡住了同样只能靠任务管理器
+    Watchdog::init();
     // 登录着账号的话，先把服务端较新的配置拉下来，再让下面的模块去读配置
     if (app->args[L"--auto-quit"] != L"true") Sync::init();
     Lang::init();

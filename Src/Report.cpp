@@ -111,7 +111,11 @@ namespace {
 				if (errorCount == 0) {
 					errors = Item{ L"error", version, os, body, L"" };
 				}
-				if (errorCount < 80) errors.detail += lines[i].text + L"\n";
+				if (errorCount < 80) {
+					errors.detail += lines[i].text + L"\n";
+					// 带调用栈的（界面线程卡死那种 "ERROR ui hung"）：紧跟着的、不以 "[" 开头的行是栈，一起带上
+					for (size_t k = i + 1; k < lines.size() && !lines[k].text.starts_with(L"["); k++) errors.detail += lines[k].text + L"\n";
+				}
 				errorCount++;
 			}
 		}
